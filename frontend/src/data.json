@@ -1,0 +1,67 @@
+{
+  "stats": {
+    "totalViolationsToday": 10,
+    "complianceRate": 50,
+    "pendingValidasi": 3
+  },
+
+  "todayViolations": [
+    { "id": 1, "waktu": "10:00, 10 April 2026", "pelanggaran": "No Helmet",      "kamera": "CAM-01", "status": "Pending" },
+    { "id": 2, "waktu": "10:45, 10 April 2026", "pelanggaran": "No Safety Vest", "kamera": "CAM-03", "status": "Validated" },
+    { "id": 3, "waktu": "11:20, 10 April 2026", "pelanggaran": "Smoking",         "kamera": "CAM-02", "status": "Pending" },
+    { "id": 4, "waktu": "12:05, 10 April 2026", "pelanggaran": "No Gloves",       "kamera": "CAM-04", "status": "Dismissed" },
+    { "id": 5, "waktu": "13:30, 10 April 2026", "pelanggaran": "No Helmet",       "kamera": "CAM-01", "status": "Pending" }
+  ],
+
+  "weeklyTrend": [
+    { "day": "Sen", "violations": 8,  "compliant": 42 },
+    { "day": "Sel", "violations": 14, "compliant": 36 },
+    { "day": "Rab", "violations": 6,  "compliant": 44 },
+    { "day": "Kam", "violations": 11, "compliant": 39 },
+    { "day": "Jum", "violations": 9,  "compliant": 41 },
+    { "day": "Sab", "violations": 4,  "compliant": 46 },
+    { "day": "Min", "violations": 10, "compliant": 40 }
+  ],
+
+  "violationTypes": [
+    { "type": "No Helmet",      "count": 34 },
+    { "type": "No Safety Vest", "count": 22 },
+    { "type": "Smoking",        "count": 18 },
+    { "type": "No Gloves",      "count": 15 },
+    { "type": "No Goggles",     "count": 11 }
+  ],
+
+  "recentAlerts": [
+    { "id": 1,  "name": "Budi Santoso",    "violation": "No Helmet",       "time": "10:00",  "camera": "CAM-01", "status": "Pending" },
+    { "id": 2,  "name": "Siti Rahayu",     "violation": "Smoking",         "time": "10:45",  "camera": "CAM-02", "status": "Validated" },
+    { "id": 3,  "name": "Agus Wijaya",     "violation": "No Safety Vest",  "time": "11:20",  "camera": "CAM-03", "status": "Dismissed" },
+    { "id": 4,  "name": "Dewi Lestari",    "violation": "No Gloves",       "time": "12:05",  "camera": "CAM-04", "status": "Pending" },
+    { "id": 5,  "name": "Eko Prasetyo",    "violation": "No Helmet",       "time": "12:50",  "camera": "CAM-01", "status": "Validated" },
+    { "id": 6,  "name": "Fitri Handayani", "violation": "No Goggles",      "time": "13:30",  "camera": "CAM-05", "status": "Pending" },
+    { "id": 7,  "name": "Hendra Kurnia",   "violation": "Smoking",         "time": "14:10",  "camera": "CAM-02", "status": "Pending" }
+  ],
+
+  "notifications": [
+    { "id": 1, "message": "Pelanggaran No Helmet terdeteksi di CAM-01", "time": "10:00", "read": false },
+    { "id": 2, "message": "3 validasi menunggu persetujuan operator",   "time": "11:00", "read": false },
+    { "id": 3, "message": "Pelanggaran Smoking terdeteksi di CAM-02",   "time": "10:45", "read": true  },
+    { "id": 4, "message": "Laporan mingguan siap diunduh",              "time": "09:00", "read": true  }
+  ],
+
+  "historyLog": [
+    { "id": 1,  "date": "10 Apr 2026", "time": "10:00", "employee": "Budi Santoso",    "violation": "No Helmet",      "camera": "CAM-01", "action": "Notified" },
+    { "id": 2,  "date": "10 Apr 2026", "time": "10:45", "employee": "Siti Rahayu",     "violation": "Smoking",        "camera": "CAM-02", "action": "Warning Issued" },
+    { "id": 3,  "date": "09 Apr 2026", "time": "09:15", "employee": "Agus Wijaya",     "violation": "No Safety Vest", "camera": "CAM-03", "action": "Dismissed" },
+    { "id": 4,  "date": "09 Apr 2026", "time": "14:30", "employee": "Dewi Lestari",    "violation": "No Gloves",      "camera": "CAM-04", "action": "Notified" },
+    { "id": 5,  "date": "08 Apr 2026", "time": "08:00", "employee": "Eko Prasetyo",    "violation": "No Helmet",      "camera": "CAM-01", "action": "Warning Issued" },
+    { "id": 6,  "date": "08 Apr 2026", "time": "11:45", "employee": "Fitri Handayani", "violation": "No Goggles",     "camera": "CAM-05", "action": "Notified" },
+    { "id": 7,  "date": "07 Apr 2026", "time": "13:20", "employee": "Hendra Kurnia",   "violation": "Smoking",        "camera": "CAM-02", "action": "Warning Issued" },
+    { "id": 8,  "date": "07 Apr 2026", "time": "15:00", "employee": "Irma Susanti",    "violation": "No Helmet",      "camera": "CAM-01", "action": "Dismissed" }
+  ],
+
+  "validationQueue": [
+    { "id": 1, "snapshot": "CAM-01_1000.jpg", "camera": "CAM-01", "detectedViolation": "No Helmet",      "confidence": 92, "time": "10:00, 10 Apr 2026", "status": "Pending" },
+    { "id": 2, "snapshot": "CAM-02_1045.jpg", "camera": "CAM-02", "detectedViolation": "Smoking",        "confidence": 87, "time": "10:45, 10 Apr 2026", "status": "Pending" },
+    { "id": 3, "snapshot": "CAM-04_1330.jpg", "camera": "CAM-04", "detectedViolation": "No Gloves",      "confidence": 78, "time": "13:30, 10 Apr 2026", "status": "Pending" }
+  ]
+}

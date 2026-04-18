@@ -1,0 +1,10 @@
+/* src/index.css — Tailwind base directives */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Smooth scrolling site-wide */
+html { scroll-behavior: smooth; }
+
+/* Remove default body margin */
+body { margin: 0; }
