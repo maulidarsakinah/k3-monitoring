@@ -36,20 +36,6 @@ function mapViolations(apiData) {
     pelanggaran: item.violations.join(", "), // Combine violations into a string
     kamera: item.camera_id, // Use camera_id from API
   }));
-  return apiData.map((item, index) => {
-    const dt = new Date(item.timestamp);
-    return {
-      id: item.id || index + 1,
-      waktu: item.timestamp,
-      date: dt.toLocaleDateString("id-ID", { day: 'numeric', month: 'short', year: 'numeric' }),
-      time: dt.toLocaleTimeString("id-ID", { hour: '2-digit', minute: '2-digit' }),
-      pelanggaran: item.violations.join(", "),
-      kamera: item.camera_id,
-      violation: item.violations.join(", "), // Untuk kompatibilitas HistoryPage
-      camera: item.camera_id,                // Untuk kompatibilitas HistoryPage
-      action: "System Detected",             // Placeholder status
-    };
-  });
 }
 
 // Constants for pagination
@@ -124,10 +110,6 @@ export default function Dashboard() {
       h.employee.toLowerCase().includes(searchQuery.toLowerCase()) ||
       h.violation.toLowerCase().includes(searchQuery.toLowerCase()) ||
       h.camera.toLowerCase().includes(searchQuery.toLowerCase()),
-  const filteredHistory = violations.filter(
-    (v) =>
-      v.violation.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      v.camera.toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
   // Pagination state
@@ -168,9 +150,6 @@ export default function Dashboard() {
     const match = data.historyLog.find(
       (h) =>
         h.violation === todayRow.pelanggaran && h.camera === todayRow.kamera,
-    const match = violations.find(
-      (v) =>
-        v.id === todayRow.id || (v.violation === todayRow.pelanggaran && v.waktu === todayRow.waktu),
     );
     // If found, pre-select that row; otherwise just open History page
     setSelectedHistoryId(match ? match.id : null);
