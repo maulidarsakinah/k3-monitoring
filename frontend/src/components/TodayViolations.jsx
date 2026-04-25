@@ -5,17 +5,15 @@
 // ============================================================
 
 export default function TodayViolations({ violations, onViewDetail }) {
-
   // Map status to badge styles
   const statusStyle = {
-    Pending:   "bg-yellow-100 text-yellow-800",
+    Pending: "bg-yellow-100 text-yellow-800",
     Validated: "bg-green-100  text-green-800",
     Dismissed: "bg-gray-100   text-gray-600",
   };
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 p-6">
-
       {/* Section heading */}
       <h2 className="text-xl font-bold text-gray-900 mb-5">Today Violations</h2>
 
@@ -48,12 +46,14 @@ export default function TodayViolations({ violations, onViewDetail }) {
 
                 {/* Action button */}
                 <td className="py-3">
-                  <button
-                    onClick={() => onViewDetail && onViewDetail(row)}
-                    className="bg-[#0d1b2a] hover:bg-[#1a2f47] text-white text-xs font-semibold px-5 py-2 rounded-full transition-colors duration-150"
-                  >
-                    Lihat Detail
-                  </button>
+                  {onViewDetail && (
+                    <button
+                      onClick={() => onViewDetail(row)}
+                      className="bg-[#0d1b2a] hover:bg-[#1a2f47] text-white text-xs font-semibold px-5 py-2 rounded-full transition-colors duration-150"
+                    >
+                      Lihat Detail
+                    </button>
+                  )}
                 </td>
               </tr>
 

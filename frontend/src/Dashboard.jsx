@@ -15,22 +15,52 @@
 import { useState, useEffect } from "react";
 import { Search, Bell, Menu, X } from "lucide-react";
 
+import { getDashboardData, getStats } from "../services/api.js";
+
 // Import all sub-components
-import Sidebar           from "./components/Sidebar.jsx";
-import StatCard          from "./components/StatCard.jsx";
-import TodayViolations   from "./components/TodayViolations.jsx";
-import StatisticsPage    from "./components/StatisticsPage.jsx";
-import HistoryPage       from "./components/HistoryPage.jsx";
-import NotificationPage  from "./components/NotificationPage.jsx";
-import ValidationPage    from "./components/ValidationPage.jsx";
+import Sidebar from "./components/Sidebar.jsx";
+import StatCard from "./components/StatCard.jsx";
+import TodayViolations from "./components/TodayViolations.jsx";
+import StatisticsPage from "./components/StatisticsPage.jsx";
+import HistoryPage from "./components/HistoryPage.jsx";
+import NotificationPage from "./components/NotificationPage.jsx";
+import ValidationPage from "./components/ValidationPage.jsx";
 
 // Import mock data
 import data from "./data.json";
 
+// Helper function to map API data to the format expected by TodayViolations
+function mapViolations(apiData) {
+  return apiData.map((item) => ({
+    waktu: item.timestamp, // Use timestamp from API
+    pelanggaran: item.violations.join(", "), // Combine violations into a string
+    kamera: item.camera_id, // Use camera_id from API
+  }));
+  return apiData.map((item, index) => {
+    const dt = new Date(item.timestamp);
+    return {
+      id: item.id || index + 1,
+      waktu: item.timestamp,
+      date: dt.toLocaleDateString("id-ID", { day: 'numeric', month: 'short', year: 'numeric' }),
+      time: dt.toLocaleTimeString("id-ID", { hour: '2-digit', minute: '2-digit' }),
+      pelanggaran: item.violations.join(", "),
+      kamera: item.camera_id,
+      violation: item.violations.join(", "), // Untuk kompatibilitas HistoryPage
+      camera: item.camera_id,                // Untuk kompatibilitas HistoryPage
+      action: "System Detected",             // Placeholder status
+    };
+  });
+}
+
+// Constants for pagination
+const ITEMS_PER_PAGE = 10; // Update limit to 10 items per page
+
 // ── Helper: format today's date as "10 April 2026" ──
 function formatDate(dateObj) {
   return dateObj.toLocaleDateString("id-ID", {
-    day: "numeric", month: "long", year: "numeric"
+    day: "numeric",
+    month: "long",
+    year: "numeric",
   });
 }
 
@@ -38,6 +68,33 @@ function formatDate(dateObj) {
 // Main Dashboard Component
 // ============================================================
 export default function Dashboard() {
+  const [violations, setViolations] = useState([]);
+  const [stats, setStats] = useState({
+    totalViolationsToday: 0,
+    complianceRate: 0,
+    pendingValidasi: 0,
+  });
+  useEffect(() => {
+    async function loadData() {
+      try {
+        const v = await getDashboardData();
+        const s = await getStats();
+
+        // Remove timestamp filtering for testing purposes
+        setViolations(mapViolations(v.violations || []));
+
+        setStats({
+          totalViolationsToday: v.violations.length || 0, // Update total to reflect all violations
+          complianceRate: s.compliance_rate || 0,
+          pendingValidasi: s.pending || 0,
+        });
+      } catch (err) {
+        console.error("API error:", err);
+      }
+    }
+
+    loadData();
+  }, []);
   // Which page is currently shown
   const [activePage, setActivePage] = useState("dashboard");
 
@@ -50,6 +107,42 @@ export default function Dashboard() {
 
   // Today's date string shown in header
   const [todayStr, setTodayStr] = useState("");
+
+  // Search state
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Filter violations for Dashboard
+  const filteredViolations = violations.filter(
+    (v) =>
+      v.pelanggaran.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      v.kamera.toLowerCase().includes(searchQuery.toLowerCase()),
+  );
+
+  // Filter history log (mock data)
+  const filteredHistory = data.historyLog.filter(
+    (h) =>
+      h.employee.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      h.violation.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      h.camera.toLowerCase().includes(searchQuery.toLowerCase()),
+  const filteredHistory = violations.filter(
+    (v) =>
+      v.violation.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      v.camera.toLowerCase().includes(searchQuery.toLowerCase()),
+  );
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+
+  // Slice violations for the current page
+  const paginatedViolations = filteredViolations.slice(
+    (currentPage - 1) * ITEMS_PER_PAGE,
+    currentPage * ITEMS_PER_PAGE,
+  );
+
+  // Reset to first page when violations change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [violations, searchQuery]); // Consolidated useEffect dependencies
 
   // Unread notification count for the bell badge
   const unreadCount = data.notifications.filter((n) => !n.read).length;
@@ -73,7 +166,11 @@ export default function Dashboard() {
   const handleViewDetail = (todayRow) => {
     // Match today's violation to the history log by violation type and time
     const match = data.historyLog.find(
-      (h) => h.violation === todayRow.pelanggaran && h.camera === todayRow.kamera
+      (h) =>
+        h.violation === todayRow.pelanggaran && h.camera === todayRow.kamera,
+    const match = violations.find(
+      (v) =>
+        v.id === todayRow.id || (v.violation === todayRow.pelanggaran && v.waktu === todayRow.waktu),
     );
     // If found, pre-select that row; otherwise just open History page
     setSelectedHistoryId(match ? match.id : null);
@@ -83,43 +180,75 @@ export default function Dashboard() {
 
   // ── Page title map ──
   const pageTitles = {
-    dashboard:    "Dashboard",
-    statistics:   "Statistik",
-    history:      "Riwayat",
+    dashboard: "Dashboard",
+    statistics: "Statistik",
+    history: "Riwayat",
     notification: "Notifikasi",
-    validation:   "Validasi",
+    validation: "Validasi",
   };
 
   // ── Render the correct page content ──
   const renderContent = () => {
     switch (activePage) {
-
       // ── DASHBOARD (Homepage) ──
       case "dashboard":
         return (
           <div className="space-y-6">
-
             {/* ── 3 Stat Cards in a responsive row ── */}
             <div className="flex flex-col sm:flex-row gap-4">
               <StatCard
                 label="Total Violations Today"
-                value={data.stats.totalViolationsToday}
+                value={stats.totalViolationsToday}
               />
+
               <StatCard
                 label="Kepatuhan (%)"
-                value={`${data.stats.complianceRate}%`}
+                value={`${stats.complianceRate}%`}
               />
+
               <StatCard
                 label="Pending Validasi"
-                value={data.stats.pendingValidasi}
+                value={stats.pendingValidasi}
               />
             </div>
 
             {/* ── Today's Violations Table ── */}
             <TodayViolations
-              violations={data.todayViolations}
+              violations={paginatedViolations}
+              // onViewDetail={handleViewDetail}
               onViewDetail={handleViewDetail}
             />
+
+            {/* Pagination Controls */}
+            <div className="flex justify-between items-center mt-4">
+              <button
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage === 1 || filteredViolations.length === 0}
+                className="px-4 py-2 bg-gray-200 text-gray-700 rounded disabled:opacity-50"
+              >
+                Sebelumnya
+              </button>
+              <span className="text-gray-700">
+                Halaman {currentPage} dari{" "}
+                {Math.max(
+                  1,
+                  Math.ceil(filteredViolations.length / ITEMS_PER_PAGE),
+                )}
+              </span>
+              <button
+                onClick={() =>
+                  setCurrentPage((p) =>
+                    p * ITEMS_PER_PAGE < filteredViolations.length ? p + 1 : p,
+                  )
+                }
+                disabled={
+                  currentPage * ITEMS_PER_PAGE >= filteredViolations.length
+                }
+                className="px-4 py-2 bg-gray-200 text-gray-700 rounded disabled:opacity-50"
+              >
+                Selanjutnya
+              </button>
+            </div>
           </div>
         );
 
@@ -132,7 +261,12 @@ export default function Dashboard() {
         );
 
       case "history":
-        return <HistoryPage historyLog={data.historyLog} selectedId={selectedHistoryId} />;
+        return (
+          <HistoryPage
+            historyLog={filteredHistory}
+            selectedId={selectedHistoryId}
+          />
+        );
 
       case "notification":
         return <NotificationPage notifications={data.notifications} />;
@@ -151,7 +285,6 @@ export default function Dashboard() {
   return (
     // Full-screen flex layout: sidebar on left, main area on right
     <div className="flex min-h-screen bg-gray-50 font-sans">
-
       {/* ── MOBILE OVERLAY (closes sidebar when tapping outside) ── */}
       {sidebarOpen && (
         <div
@@ -175,10 +308,8 @@ export default function Dashboard() {
 
       {/* ── MAIN AREA (header + page content) ── */}
       <div className="flex-1 flex flex-col min-w-0">
-
         {/* ── TOP HEADER ── */}
         <header className="bg-white border-b border-gray-100 px-6 py-4 flex items-center gap-4">
-
           {/* Hamburger — mobile only */}
           <button
             onClick={() => setSidebarOpen(true)}
@@ -189,10 +320,15 @@ export default function Dashboard() {
 
           {/* Search bar */}
           <div className="flex-1 relative max-w-sm">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <Search
+              size={15}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+            />
             <input
               type="text"
               placeholder="Cari pelanggaran, karyawan..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-9 pr-4 py-2 text-sm bg-gray-100 rounded-full outline-none focus:ring-2 focus:ring-violet-300 transition"
             />
           </div>
@@ -221,7 +357,6 @@ export default function Dashboard() {
 
         {/* ── PAGE CONTENT ── */}
         <main className="flex-1 p-6">
-
           {/* Page heading row */}
           <div className="flex items-start justify-between mb-6">
             <h1 className="text-3xl font-bold text-gray-900">
