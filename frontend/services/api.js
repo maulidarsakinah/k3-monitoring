@@ -9,3 +9,8 @@ export const getStats = async () => {
   const res = await fetch(`${BASE_URL}/violations/stats`);
   return res.json();
 };
+
+export const getHistoryLog = async () => {
+  const res = await fetch(`${BASE_URL}/violations`); // Menggunakan endpoint yang sama atau sesuaikan jika ada endpoint khusus history
+  return res.json();
+};

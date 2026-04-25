@@ -17,6 +17,7 @@ import { Search, Bell, Menu, X } from "lucide-react";
 
 import { getDashboardData, getStats } from "../services/api.js";
 
+import { getHistoryLog } from "../services/api.js"; // Import the new API function
 // Import all sub-components
 import Sidebar from "./components/Sidebar.jsx";
 import StatCard from "./components/StatCard.jsx";
@@ -28,14 +29,31 @@ import ValidationPage from "./components/ValidationPage.jsx";
 
 // Import mock data
 import data from "./data.json";
-
 // Helper function to map API data to the format expected by TodayViolations
 function mapViolations(apiData) {
   return apiData.map((item) => ({
-    waktu: item.timestamp, // Use timestamp from API
-    pelanggaran: item.violations.join(", "), // Combine violations into a string
-    kamera: item.camera_id, // Use camera_id from API
+    waktu: item.timestamp,
+    pelanggaran: (item.violations || []).join(", "),
+    kamera: item.camera_id,
   }));
+}
+
+// Helper function to map API data to the format expected by HistoryPage
+function mapHistory(apiData) {
+  return apiData.map((item) => {
+    const dt = new Date(item.timestamp);
+    return {
+      id: item.id || Math.random().toString(36).substr(2, 9),
+      date: dt.toLocaleDateString("id-ID"),
+      time: dt.toLocaleTimeString("id-ID", {
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+      violation: (item.violations || []).join(", "),
+      camera: item.camera_id,
+      action: item.status || "Notified", // Fallback status
+    };
+  });
 }
 
 // Constants for pagination
@@ -55,6 +73,7 @@ function formatDate(dateObj) {
 // ============================================================
 export default function Dashboard() {
   const [violations, setViolations] = useState([]);
+  const [historyLog, setHistoryLog] = useState([]); // New state for history data
   const [stats, setStats] = useState({
     totalViolationsToday: 0,
     complianceRate: 0,
@@ -65,9 +84,11 @@ export default function Dashboard() {
       try {
         const v = await getDashboardData();
         const s = await getStats();
+        const h = await getHistoryLog(); // Fetch history data
 
         // Remove timestamp filtering for testing purposes
         setViolations(mapViolations(v.violations || []));
+        setHistoryLog(mapHistory(h.violations || h || [])); // Map and set history log data
 
         setStats({
           totalViolationsToday: v.violations.length || 0, // Update total to reflect all violations
@@ -100,16 +121,15 @@ export default function Dashboard() {
   // Filter violations for Dashboard
   const filteredViolations = violations.filter(
     (v) =>
-      v.pelanggaran.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      v.kamera.toLowerCase().includes(searchQuery.toLowerCase()),
+      (v.pelanggaran || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (v.kamera || "").toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
-  // Filter history log (mock data)
-  const filteredHistory = data.historyLog.filter(
+  // Filter history log (tanpa kolom karyawan)
+  const filteredHistory = historyLog.filter(
     (h) =>
-      h.employee.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      h.violation.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      h.camera.toLowerCase().includes(searchQuery.toLowerCase()),
+      (h.violation || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (h.camera || "").toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
   // Pagination state
@@ -120,6 +140,10 @@ export default function Dashboard() {
     (currentPage - 1) * ITEMS_PER_PAGE,
     currentPage * ITEMS_PER_PAGE,
   );
+
+  // Pagination calculations (sync with HistoryPage style)
+  const totalPages = Math.ceil(filteredViolations.length / ITEMS_PER_PAGE);
+  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
 
   // Reset to first page when violations change
   useEffect(() => {
@@ -146,8 +170,7 @@ export default function Dashboard() {
   // Finds the matching history log entry by violation + time, then
   // navigates to History and opens that row's detail panel.
   const handleViewDetail = (todayRow) => {
-    // Match today's violation to the history log by violation type and time
-    const match = data.historyLog.find(
+    const match = historyLog.find(
       (h) =>
         h.violation === todayRow.pelanggaran && h.camera === todayRow.kamera,
     );
@@ -176,7 +199,7 @@ export default function Dashboard() {
             {/* ── 3 Stat Cards in a responsive row ── */}
             <div className="flex flex-col sm:flex-row gap-4">
               <StatCard
-                label="Total Violations Today"
+                label="Total Pelanggaran Hari Ini"
                 value={stats.totalViolationsToday}
               />
 
@@ -191,42 +214,60 @@ export default function Dashboard() {
               />
             </div>
 
-            {/* ── Today's Violations Table ── */}
-            <TodayViolations
-              violations={paginatedViolations}
-              // onViewDetail={handleViewDetail}
-              onViewDetail={handleViewDetail}
-            />
+            {/* ── Today's Violations Section (Synced with HistoryPage style) ── */}
+            <div className="bg-white rounded-2xl border border-gray-100 p-6 flex flex-col h-[720px]">
+              <div className="overflow-auto flex-1 border-b border-gray-50">
+                <TodayViolations
+                  violations={paginatedViolations}
+                  onViewDetail={handleViewDetail}
+                />
+              </div>
 
-            {/* Pagination Controls */}
-            <div className="flex justify-between items-center mt-4">
-              <button
-                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                disabled={currentPage === 1 || filteredViolations.length === 0}
-                className="px-4 py-2 bg-gray-200 text-gray-700 rounded disabled:opacity-50"
-              >
-                Sebelumnya
-              </button>
-              <span className="text-gray-700">
-                Halaman {currentPage} dari{" "}
-                {Math.max(
-                  1,
-                  Math.ceil(filteredViolations.length / ITEMS_PER_PAGE),
-                )}
-              </span>
-              <button
-                onClick={() =>
-                  setCurrentPage((p) =>
-                    p * ITEMS_PER_PAGE < filteredViolations.length ? p + 1 : p,
-                  )
-                }
-                disabled={
-                  currentPage * ITEMS_PER_PAGE >= filteredViolations.length
-                }
-                className="px-4 py-2 bg-gray-200 text-gray-700 rounded disabled:opacity-50"
-              >
-                Selanjutnya
-              </button>
+              {/* Pagination Controls */}
+              <div className="mt-6 flex items-center justify-between border-t border-gray-100 pt-4">
+                <p className="text-xs text-gray-400">
+                  Menampilkan {startIndex + 1} -{" "}
+                  {Math.min(
+                    startIndex + ITEMS_PER_PAGE,
+                    filteredViolations.length,
+                  )}{" "}
+                  dari {filteredViolations.length} kejadian
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    disabled={currentPage === 1}
+                    onClick={() => setCurrentPage((p) => p - 1)}
+                    className="px-4 py-2 bg-gray-100 text-gray-600 text-xs font-bold rounded-lg disabled:opacity-50"
+                  >
+                    Sebelumnya
+                  </button>
+
+                  <div className="flex items-center gap-1">
+                    {[...Array(totalPages)]
+                      .map((_, i) => (
+                        <button
+                          key={i}
+                          onClick={() => setCurrentPage(i + 1)}
+                          className={`w-8 h-8 rounded-lg text-xs font-bold transition-colors ${currentPage === i + 1 ? "bg-blue-500 text-white" : "text-gray-400 hover:bg-gray-50"}`}
+                        >
+                          {i + 1}
+                        </button>
+                      ))
+                      .slice(
+                        Math.max(0, currentPage - 2),
+                        Math.min(totalPages, currentPage + 1),
+                      )}
+                  </div>
+
+                  <button
+                    disabled={currentPage === totalPages || totalPages === 0}
+                    onClick={() => setCurrentPage((p) => p + 1)}
+                    className="px-4 py-2 bg-gray-100 text-gray-600 text-xs font-bold rounded-lg disabled:opacity-50"
+                  >
+                    Selanjutnya
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         );
@@ -305,7 +346,7 @@ export default function Dashboard() {
             />
             <input
               type="text"
-              placeholder="Cari pelanggaran, karyawan..."
+              placeholder="Cari pelanggaran atau kamera..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-9 pr-4 py-2 text-sm bg-gray-100 rounded-full outline-none focus:ring-2 focus:ring-violet-300 transition"
