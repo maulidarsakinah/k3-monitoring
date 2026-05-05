@@ -9,20 +9,22 @@ from models import DetectionResult, Detection
 logger = logging.getLogger(__name__)
 
 APD_CLASS_CONFIG = {
-    "Hardhat":          {"category": "pelindung_kepala",  "required": True},
-    "Gloves":           {"category": "pelindung_tangan",  "required": True},
-    "Goggles":          {"category": "pelindung_mata",    "required": True},
-    "Mask":             {"category": "pelindung_wajah",   "required": True},
-    "Safety Vest":      {"category": "pelindung_tubuh",   "required": True},
-    "NO-Hardhat":       {"category": "pelindung_kepala",  "required": False, "is_violation": True},
-    "NO-Gloves":        {"category": "pelindung_tangan",  "required": False, "is_violation": True},
-    "NO-Goggles":       {"category": "pelindung_mata",    "required": False, "is_violation": True},
-    "NO-Mask":          {"category": "pelindung_wajah",   "required": False, "is_violation": True},
-    "NO-Safety Vest":   {"category": "pelindung_tubuh",   "required": False, "is_violation": True},
-    "Fall-Detected":    {"category": "keselamatan_umum",  "required": False, "is_violation": True},
-    "Person":           {"category": "person",            "required": False},
-    "Ladder":           {"category": "objek",             "required": False},
-    "Safety Cone":      {"category": "objek",             "required": False},
+    # APD wajib dipakai
+    "helmet":    {"category": "pelindung_kepala",  "required": True},
+    "gloves":    {"category": "pelindung_tangan",  "required": True},
+    "goggles":   {"category": "pelindung_mata",    "required": True},
+    "vest":      {"category": "pelindung_tubuh",   "required": True},
+    "boots":     {"category": "pelindung_kaki",    "required": True},
+
+    # Pelanggaran langsung
+    "no-helmet":  {"category": "pelindung_kepala",  "required": False, "is_violation": True},
+    "no-gloves":  {"category": "pelindung_tangan",  "required": False, "is_violation": True},
+    "no-goggles": {"category": "pelindung_mata",    "required": False, "is_violation": True},
+    "no-vest":    {"category": "pelindung_tubuh",   "required": False, "is_violation": True},
+    "no-boots":   {"category": "pelindung_kaki",    "required": False, "is_violation": True},
+
+    # Konteks
+    "person":    {"category": "person",             "required": False},
 }
 
 VIOLATION_CONFIDENCE_THRESHOLD = 0.30
@@ -124,11 +126,11 @@ class APDDetector:
             return violations
 
         apd_pairs = [
-            ("Hardhat",     "NO-Hardhat"),
-            ("Gloves",      "NO-Gloves"),
-            ("Goggles",     "NO-Goggles"),
-            ("Mask",        "NO-Mask"),
-            ("Safety Vest", "NO-Safety Vest"),
+            ("helmet",  "no-helmet"),
+            ("gloves",  "no-gloves"),
+            ("goggles", "no-goggles"),
+            ("vest",    "no-vest"),
+            ("boots",   "no-boots"),
         ]
         for apd_class, no_apd_class in apd_pairs:
             if apd_class not in detected_classes and no_apd_class not in detected_classes:
@@ -138,12 +140,11 @@ class APDDetector:
 
     def _violation_label(self, class_name: str) -> str:
         labels = {
-            "NO-Hardhat":      "Tidak menggunakan helm (hardhat)",
-            "NO-Gloves":       "Tidak menggunakan sarung tangan",
-            "NO-Goggles":      "Tidak menggunakan kacamata pelindung",
-            "NO-Mask":         "Tidak menggunakan masker",
-            "NO-Safety Vest":  "Tidak menggunakan rompi keselamatan",
-            "Fall-Detected":   "Terdeteksi jatuh / terjatuh",
+            "no-helmet":  "Tidak menggunakan helm",
+            "no-gloves":  "Tidak menggunakan sarung tangan",
+            "no-goggles": "Tidak menggunakan kacamata pelindung",
+            "no-vest":    "Tidak menggunakan rompi keselamatan",
+            "no-boots":   "Tidak menggunakan sepatu keselamatan",
         }
         return labels.get(class_name, f"Pelanggaran: {class_name}")
 
