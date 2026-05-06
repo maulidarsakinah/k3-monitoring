@@ -22,6 +22,23 @@ DB_PATH = "violations.db"
 # hr_cao         → Generate laporan, kelola data pelanggaran
 # operator       → Monitoring real-time, terima notifikasi, lihat dashboard
 
+# ------- username & Password
+# -- tim IT
+# username: admin
+# password: admin123
+
+# -- manager
+# username: manager01
+# password: manager123
+
+# -- hr/cao
+# username: hr01
+# password: hr123
+
+# -- general manager
+# username: gm01
+# password: gm123
+
 VALID_ROLES = ("admin", "manager", "general_manager", "hr_cao", "operator")
 
 ROLE_LABELS = {
