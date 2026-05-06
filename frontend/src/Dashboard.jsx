@@ -12,16 +12,21 @@
 //     └── ValidationPage.jsx    (CV verification queue)
 // ============================================================
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Search, Bell, Menu, X } from "lucide-react";
 
-import { getDashboardData, getStats } from "../services/api.js";
+import {
+  getDashboardData,
+  getStatistics,
+  getHistoryLog,
+  getPendingViolations,
+} from "../services/api.js";
 
-import { getHistoryLog } from "../services/api.js"; // Import the new API function
 // Import all sub-components
 import Sidebar from "./components/Sidebar.jsx";
 import StatCard from "./components/StatCard.jsx";
 import TodayViolations from "./components/TodayViolations.jsx";
+// StatisticsPage, HistoryPage, NotificationPage, ValidationPage will be imported below
 import StatisticsPage from "./components/StatisticsPage.jsx";
 import HistoryPage from "./components/HistoryPage.jsx";
 import NotificationPage from "./components/NotificationPage.jsx";
@@ -40,6 +45,7 @@ function mapViolations(apiData) {
 
 // Helper function to map API data to the format expected by HistoryPage
 function mapHistory(apiData) {
+  if (!Array.isArray(apiData)) return [];
   return apiData.map((item) => {
     const dt = new Date(item.timestamp);
     return {
@@ -54,6 +60,22 @@ function mapHistory(apiData) {
       action: item.status || "Notified", // Fallback status
     };
   });
+}
+
+// Helper function to map API data to the format expected by ValidationPage
+function mapValidationQueue(apiData) {
+  if (!Array.isArray(apiData)) return [];
+  return apiData.map((item) => ({
+    id: item.id,
+    camera: item.camera_id,
+    confidence: Math.round((item.confidence || 0.85) * 100), // Default mock confidence if missing
+    detectedViolation: (item.violations || []).join(", "),
+    time: new Date(item.timestamp).toLocaleTimeString("id-ID", {
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+    status: item.status === "pending" ? "Pending" : item.status, // Match UI capitalization
+  }));
 }
 
 // Constants for pagination
@@ -74,34 +96,72 @@ function formatDate(dateObj) {
 export default function Dashboard() {
   const [violations, setViolations] = useState([]);
   const [historyLog, setHistoryLog] = useState([]); // New state for history data
+  const [validationQueue, setValidationQueue] = useState([]);
   const [stats, setStats] = useState({
     totalViolationsToday: 0,
     complianceRate: 0,
     pendingValidasi: 0,
   });
+  const [weeklyTrend, setWeeklyTrend] = useState([]);
+  const [violationTypes, setViolationTypes] = useState([]);
+  const [cameraBreakdown, setCameraBreakdown] = useState([]);
+  const [selectedCamera, setSelectedCamera] = useState(""); // State baru untuk filter kamera
+  const [hourlyBreakdown, setHourlyBreakdown] = useState([]);
+  const [timeRange, setTimeRange] = useState("7d"); // Default to 7 days
+  const [customStartDate, setCustomStartDate] = useState("");
+  const [customEndDate, setCustomEndDate] = useState("");
+
   useEffect(() => {
     async function loadData() {
       try {
-        const v = await getDashboardData();
-        const s = await getStats();
-        const h = await getHistoryLog(); // Fetch history data
+        const now = new Date();
+        let startDateStr = "";
+        let endDateStr = "";
+
+        if (timeRange === "today") {
+          startDateStr = now.toISOString().split("T")[0];
+        } else if (timeRange === "7d") {
+          const start = new Date();
+          start.setDate(now.getDate() - 7);
+          startDateStr = start.toISOString().split("T")[0];
+        } else if (timeRange === "30d") {
+          const start = new Date();
+          start.setDate(now.getDate() - 30);
+          startDateStr = start.toISOString().split("T")[0];
+        } else if (timeRange === "custom") {
+          startDateStr = customStartDate;
+          endDateStr = customEndDate;
+        }
+
+        const apiParams = {};
+        if (startDateStr) apiParams.start_date = startDateStr;
+        if (endDateStr) apiParams.end_date = endDateStr;
+        if (selectedCamera) apiParams.camera_id = selectedCamera; // Kirim filter kamera ke API
+
+        const v = await getDashboardData(apiParams).catch(() => ({
+          violations: [],
+        }));
+        const s = await getStatistics(apiParams);
+        const h = await getHistoryLog(apiParams).catch(() => []);
+        const q = await getPendingViolations(apiParams).catch(() => []);
 
         // Remove timestamp filtering for testing purposes
         setViolations(mapViolations(v.violations || []));
-        setHistoryLog(mapHistory(h.violations || h || [])); // Map and set history log data
+        setHistoryLog(mapHistory(h || [])); // Map and set history log data
+        setValidationQueue(mapValidationQueue(q));
 
-        setStats({
-          totalViolationsToday: v.violations.length || 0, // Update total to reflect all violations
-          complianceRate: s.compliance_rate || 0,
-          pendingValidasi: s.pending || 0,
-        });
+        setStats(s);
+        setWeeklyTrend(s.weeklyTrend || []);
+        setViolationTypes(s.violationTypes || []);
+        setCameraBreakdown(s.cameraBreakdown || []);
+        setHourlyBreakdown(s.hourlyBreakdown || []);
       } catch (err) {
         console.error("API error:", err);
       }
     }
 
     loadData();
-  }, []);
+  }, [timeRange, customStartDate, customEndDate, selectedCamera]); // Tambahkan selectedCamera ke dependency
   // Which page is currently shown
   const [activePage, setActivePage] = useState("dashboard");
 
@@ -151,7 +211,7 @@ export default function Dashboard() {
   }, [violations, searchQuery]); // Consolidated useEffect dependencies
 
   // Unread notification count for the bell badge
-  const unreadCount = data.notifications.filter((n) => !n.read).length;
+  const unreadCount = 0; // Update this later if notifications are integrated
 
   // Set today's date on first render
   useEffect(() => {
@@ -275,8 +335,13 @@ export default function Dashboard() {
       case "statistics":
         return (
           <StatisticsPage
-            weeklyTrend={data.weeklyTrend}
-            violationTypes={data.violationTypes}
+            weeklyTrend={weeklyTrend}
+            violationTypes={violationTypes}
+            cameraBreakdown={cameraBreakdown}
+            hourlyBreakdown={hourlyBreakdown}
+            stats={stats}
+            timeRange={timeRange}
+            onTimeRangeChange={setTimeRange}
           />
         );
 
@@ -289,10 +354,15 @@ export default function Dashboard() {
         );
 
       case "notification":
-        return <NotificationPage notifications={data.notifications} />;
+        return <NotificationPage notifications={[]} />; // Placeholder, integrate real notifications later
 
       case "validation":
-        return <ValidationPage validationQueue={data.validationQueue} />;
+        return (
+          <ValidationPage
+            validationQueue={validationQueue}
+            setValidationQueue={setValidationQueue}
+          />
+        );
 
       default:
         return null;
@@ -355,6 +425,61 @@ export default function Dashboard() {
 
           {/* Spacer pushes notification + profile to the right */}
           <div className="flex-1" />
+
+          {/* Filter Kamera */}
+          <select
+            value={selectedCamera}
+            onChange={(e) => setSelectedCamera(e.target.value)}
+            className="text-[10px] bg-gray-100 border-none rounded-lg px-3 py-2 mr-2 outline-none font-bold text-gray-600"
+          >
+            <option value="">Semua Kamera</option>
+            {cameraBreakdown.map((c) => (
+              <option key={c.camera} value={c.camera}>{c.camera}</option>
+            ))}
+          </select>
+
+          {/* Time Range Filter for Statistics */}
+          {activePage === "statistics" && (
+            <div className="flex items-center gap-2 mr-4">
+              <div className="flex bg-gray-100 p-1 rounded-xl">
+                {[
+                  { id: "today", label: "Hari Ini" },
+                  { id: "7d", label: "7 Hari" },
+                  { id: "30d", label: "30 Hari" },
+                  { id: "custom", label: "Kustom" },
+                ].map((range) => (
+                  <button
+                    key={range.id}
+                    onClick={() => setTimeRange(range.id)}
+                    className={`px-3 py-1.5 text-[10px] font-bold rounded-lg transition-all ${
+                      timeRange === range.id
+                        ? "bg-white text-violet-600 shadow-sm"
+                        : "text-gray-500 hover:text-gray-700"
+                    }`}
+                  >
+                    {range.label}
+                  </button>
+                ))}
+              </div>
+              {timeRange === "custom" && (
+                <div className="flex items-center gap-1">
+                  <input
+                    type="date"
+                    value={customStartDate}
+                    onChange={(e) => setCustomStartDate(e.target.value)}
+                    className="text-[10px] bg-gray-100 border-none rounded-lg px-2 py-1.5 focus:ring-1 focus:ring-violet-300 outline-none"
+                  />
+                  <span className="text-gray-400 text-[10px]">-</span>
+                  <input
+                    type="date"
+                    value={customEndDate}
+                    onChange={(e) => setCustomEndDate(e.target.value)}
+                    className="text-[10px] bg-gray-100 border-none rounded-lg px-2 py-1.5 focus:ring-1 focus:ring-violet-300 outline-none"
+                  />
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Notification bell with unread badge */}
           <button

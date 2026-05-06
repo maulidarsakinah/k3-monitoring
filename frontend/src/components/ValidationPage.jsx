@@ -5,27 +5,46 @@
 // ============================================================
 
 import { useState } from "react";
-import { ShieldCheck, ShieldX, Camera } from "lucide-react";
+import { ShieldCheck, ShieldX, Camera, Loader2 } from "lucide-react";
+import { validateViolation } from "../../services/api";
 
-export default function ValidationPage({ validationQueue: initialQueue }) {
-  // Local state so approvals/dismissals update the UI instantly
-  const [queue, setQueue] = useState(initialQueue);
+export default function ValidationPage({
+  validationQueue: queue,
+  setValidationQueue: setQueue,
+}) {
+  const [loadingId, setLoadingId] = useState(null);
 
   // Handle operator action: "Approve" or "Dismiss"
-  const handleAction = (id, action) => {
-    setQueue((prev) =>
-      prev.map((item) =>
-        item.id === id
-          ? { ...item, status: action === "approve" ? "Validated" : "Dismissed" }
-          : item
-      )
-    );
+  const handleAction = async (id, action) => {
+    setLoadingId(id);
+    try {
+      // Map UI actions to backend actions: approve -> approved, dismiss -> rejected
+      const backendAction = action === "approve" ? "approved" : "rejected";
+      await validateViolation(id, backendAction, "Validated via Dashboard");
+
+      setQueue((prev) =>
+        prev.map((item) =>
+          item.id === id
+            ? {
+                ...item,
+                status: action === "approve" ? "Validated" : "Dismissed",
+              }
+            : item,
+        ),
+      );
+    } catch (err) {
+      alert("Gagal melakukan validasi: " + err.message);
+    } finally {
+      setLoadingId(null);
+    }
   };
 
   return (
     <div className="space-y-4">
       <div className="bg-white rounded-2xl border border-gray-100 p-6">
-        <h2 className="text-xl font-bold text-gray-900 mb-1">Validasi Deteksi</h2>
+        <h2 className="text-xl font-bold text-gray-900 mb-1">
+          Validasi Deteksi
+        </h2>
         <p className="text-sm text-gray-400 mb-6">
           Verifikasi hasil deteksi Computer Vision sebelum tindak lanjut
         </p>
@@ -51,15 +70,21 @@ export default function ValidationPage({ validationQueue: initialQueue }) {
                   </span>
                   {/* Status overlay for non-pending */}
                   {!isPending && (
-                    <div className={`absolute inset-0 flex items-center justify-center text-white font-bold text-lg ${item.status === "Validated" ? "bg-green-900/60" : "bg-gray-900/60"}`}>
-                      {item.status === "Validated" ? "✓ Validated" : "✕ Dismissed"}
+                    <div
+                      className={`absolute inset-0 flex items-center justify-center text-white font-bold text-lg ${item.status === "Validated" ? "bg-green-900/60" : "bg-gray-900/60"}`}
+                    >
+                      {item.status === "Validated"
+                        ? "✓ Validated"
+                        : "✕ Dismissed"}
                     </div>
                   )}
                 </div>
 
                 {/* Card body */}
                 <div className="p-4 space-y-2">
-                  <p className="font-semibold text-gray-800 text-sm">{item.detectedViolation}</p>
+                  <p className="font-semibold text-gray-800 text-sm">
+                    {item.detectedViolation}
+                  </p>
                   <p className="text-xs text-gray-400">{item.time}</p>
 
                   {/* Action buttons — only shown when pending */}
