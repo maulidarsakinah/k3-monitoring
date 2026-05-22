@@ -1,55 +1,242 @@
-import cv2, asyncio, websockets, base64, json
+# simulate_camera.py - test stream backend tanpa frontend.
+import asyncio
+import base64
+import json
 
-async def simulate():
-    cap = cv2.VideoCapture(0)
+import cv2
+import numpy as np
+import websockets
+
+WS_URL = "ws://localhost:8000/ws/camera/cam_test"
+CAMERA_INDEX = 0
+TARGET_FPS = 60
+FRAME_INTERVAL_SEC = 1.0 / TARGET_FPS
+RECV_TIMEOUT_SEC = 0.001
+WINDOW_NAME = "APD Camera Simulator"
+SIDEBAR_WIDTH = 320
+
+ATTRIBUTE_ITEMS = [
+    {"class_name": "helmet",  "missing_class": "no-helmet",  "label": "Helmet"},
+    {"class_name": "vest",    "missing_class": "no-vest",    "label": "Safety Vest"},
+    {"class_name": "gloves",  "missing_class": "no-gloves",  "label": "Gloves"},
+    {"class_name": "goggles", "missing_class": "no-goggles", "label": "Goggles"},
+    {"class_name": "boots",   "missing_class": "no-boots",   "label": "Boots"},
+]
+
+
+def wrap_text(text: str, max_chars: int = 34) -> list[str]:
+    words = text.split()
+    if not words:
+        return [""]
+    lines = []
+    current = words[0]
+    for word in words[1:]:
+        candidate = f"{current} {word}"
+        if len(candidate) <= max_chars:
+            current = candidate
+        else:
+            lines.append(current)
+            current = word
+    lines.append(current)
+    return lines
+
+
+def draw_overlay(frame, summary: str, has_violation: bool) -> None:
+    color = (0, 0, 255) if has_violation else (0, 180, 0)
+    status = "VIOLATION" if has_violation else "OK"
+    panel_right = min(frame.shape[1] - 10, 680)
+    cv2.rectangle(frame, (10, 10), (panel_right, 72), (18, 18, 18), -1)
+    cv2.putText(frame, f"Status: {status}", (20, 32),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 1, cv2.LINE_AA)
+    cv2.putText(frame, summary[:100], (20, 56),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.43, (230, 230, 230), 1, cv2.LINE_AA)
+    cv2.putText(frame, "Press q or Esc to exit", (20, frame.shape[0] - 18),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.42, (245, 245, 245), 1, cv2.LINE_AA)
+
+
+def build_attribute_checklist(detections: list[dict]) -> list[dict]:
+    top_conf: dict[str, float] = {}
+    for det in detections:
+        class_name = str(det.get("class_name", ""))
+        try:
+            confidence = float(det.get("confidence", 0.0))
+        except (TypeError, ValueError):
+            confidence = 0.0
+        if class_name and confidence > top_conf.get(class_name, -1.0):
+            top_conf[class_name] = confidence
+
+    checklist = []
+    for item in ATTRIBUTE_ITEMS:
+        used_cls = item["class_name"]
+        missing_cls = item["missing_class"]
+        if used_cls in top_conf:
+            checklist.append({"label": item["label"], "state": "used",    "confidence": top_conf[used_cls]})
+        elif missing_cls in top_conf:
+            checklist.append({"label": item["label"], "state": "missing", "confidence": top_conf[missing_cls]})
+        else:
+            checklist.append({"label": item["label"], "state": "unknown", "confidence": None})
+    return checklist
+
+
+def compose_frame_with_sidebar(frame, summary, has_violation, detections,
+                                checklist, severity="none", logged=True):
+    height, width = frame.shape[:2]
+    canvas = np.zeros((height, width + SIDEBAR_WIDTH, 3), dtype=np.uint8)
+    canvas[:, :width] = frame
+
+    sidebar_left = width
+    cv2.rectangle(canvas, (sidebar_left, 0), (width + SIDEBAR_WIDTH, height), (18, 22, 30), -1)
+    cv2.line(canvas, (sidebar_left, 0), (sidebar_left, height), (64, 70, 84), 1)
+
+    title_color = (239, 242, 247)
+    label_color = (148, 163, 184)
+
+    # Judul
+    cv2.putText(canvas, "Checklist APD", (sidebar_left + 18, 36),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.72, title_color, 2, cv2.LINE_AA)
+
+    # Status
+    status_line = "Status: VIOLATION" if has_violation else "Status: OK"
+    status_color = (70, 90, 255) if has_violation else (80, 220, 120)
+    cv2.putText(canvas, status_line, (sidebar_left + 18, 62),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.48, status_color, 1, cv2.LINE_AA)
+
+    # Severity + logged status
+    severity_colors = {
+        "none": (150, 150, 150), "low": (80, 220, 120),
+        "medium": (0, 165, 255), "high": (70, 90, 255)
+    }
+    sev_color = severity_colors.get(severity, (150, 150, 150))
+    logged_text = "SAVED" if logged else "COOLDOWN"
+    logged_color = (80, 220, 120) if logged else (0, 165, 255)
+    cv2.putText(canvas, f"Severity: {severity.upper()}  [{logged_text}]",
+                (sidebar_left + 18, 82),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.42, sev_color if has_violation else label_color,
+                1, cv2.LINE_AA)
+
+    y = 108
+    cv2.putText(canvas, "Atribut yang sedang dipakai", (sidebar_left + 18, y),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.44, label_color, 1, cv2.LINE_AA)
+
+    y += 28
+    for item in checklist:
+        if item["state"] == "used":
+            prefix, color = "[x]", (80, 220, 120)
+        elif item["state"] == "missing":
+            prefix, color = "[ ]", (70, 90, 255)
+        else:
+            prefix, color = "[-]", (167, 176, 191)
+
+        conf = item["confidence"]
+        line = f"{prefix} {item['label']}  ({int(conf * 100)}%)" if conf is not None else f"{prefix} {item['label']}"
+        cv2.putText(canvas, line, (sidebar_left + 18, y),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.47, color, 1, cv2.LINE_AA)
+        y += 29
+
+    y += 8
+    cv2.putText(canvas, "Ringkasan deteksi", (sidebar_left + 18, y),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.44, label_color, 1, cv2.LINE_AA)
+    y += 24
+    for line in wrap_text(summary, max_chars=36)[:4]:
+        cv2.putText(canvas, line, (sidebar_left + 18, y),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.44, (225, 229, 236), 1, cv2.LINE_AA)
+        y += 22
+
+    detected_classes = sorted(
+        {str(d.get("class_name", "")).strip() for d in detections if d.get("class_name")}
+    )
+    y += 8
+    cv2.putText(canvas, "Class terdeteksi", (sidebar_left + 18, y),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.44, label_color, 1, cv2.LINE_AA)
+    y += 24
+    class_text = ", ".join(detected_classes) if detected_classes else "-"
+    for line in wrap_text(class_text, max_chars=36)[:5]:
+        cv2.putText(canvas, line, (sidebar_left + 18, y),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, (210, 217, 228), 1, cv2.LINE_AA)
+        y += 20
+
+    return canvas
+
+
+async def simulate() -> None:
+    cap = cv2.VideoCapture(CAMERA_INDEX)
     if not cap.isOpened():
-        print("❌ Webcam tidak ditemukan")
-        return
+        raise RuntimeError(f"Gagal membuka kamera index {CAMERA_INDEX}.")
+    cap.set(cv2.CAP_PROP_FPS, TARGET_FPS)
 
-    print("✅ Webcam terhubung, mulai streaming...")
+    cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(WINDOW_NAME, 1320, 620)
 
     try:
-        async with websockets.connect("ws://localhost:8000/ws/camera/cam_test") as ws:
+        async with websockets.connect(WS_URL) as ws:
+            print(f"Connected to {WS_URL} | target FPS: {TARGET_FPS}")
+            summary = "Menunggu hasil deteksi..."
+            has_violation = False
+            severity = "none"
+            logged = True
+            latest_detections: list[dict] = []
+            loop = asyncio.get_running_loop()
+
             while True:
+                frame_start = loop.time()
                 ret, frame = cap.read()
                 if not ret:
+                    print("Frame kamera gagal dibaca.")
                     break
 
-                _, buf = cv2.imencode(".jpg", frame)
-                await ws.send(json.dumps({"image": base64.b64encode(buf).decode()}))
-
-                result = json.loads(await ws.recv())
-
-                if result.get("type") != "detection":
+                ok, buf = cv2.imencode(".jpg", frame)
+                if not ok:
                     continue
 
-                print(result.get("summary", "-"))
+                await ws.send(json.dumps({"image": base64.b64encode(buf).decode("ascii")}))
 
-                # Status
-                color = (0, 0, 255) if result["has_violation"] else (0, 255, 0)
-                status = "PELANGGARAN!" if result["has_violation"] else "APD LENGKAP"
-                cv2.putText(frame, status, (10, 30),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
+                try:
+                    while True:
+                        raw_message = await asyncio.wait_for(ws.recv(), timeout=RECV_TIMEOUT_SEC)
+                        result = json.loads(raw_message)
+                        msg_type = result.get("type")
 
-                # Daftar pelanggaran — tiap item 1 baris
-                violations = result.get("violations", [])
-                for i, v in enumerate(violations):
-                    cv2.putText(frame, v, (10, 60 + i * 25),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+                        if msg_type == "detection":
+                            summary       = result.get("summary", summary)
+                            has_violation = bool(result.get("has_violation", False))
+                            severity      = result.get("severity", "none")
+                            logged        = result.get("logged", True)
+                            latest_detections = result.get("detections", [])
 
-                cv2.imshow("APD Detection", frame)
+                            # Print ke terminal dengan info logged & severity
+                            logged_tag = "SAVED" if logged else "COOLDOWN"
+                            print(f"{summary} | severity: {severity} | {logged_tag}")
 
-                if cv2.waitKey(1) & 0xFF == ord('q'):
+                        elif msg_type == "ping":
+                            summary, has_violation = "Ping dari server", False
+                        elif msg_type == "error":
+                            summary, has_violation = f"Error: {result.get('message')}", True
+                except asyncio.TimeoutError:
+                    pass
+
+                preview = frame.copy()
+                draw_overlay(preview, summary, has_violation)
+                checklist = build_attribute_checklist(latest_detections)
+                combined = compose_frame_with_sidebar(
+                    preview, summary=summary, has_violation=has_violation,
+                    detections=latest_detections, checklist=checklist,
+                    severity=severity, logged=logged
+                )
+                cv2.imshow(WINDOW_NAME, combined)
+
+                key = cv2.waitKey(1) & 0xFF
+                if key in (ord("q"), 27):
+                    print("Keluar dari simulator kamera.")
                     break
 
-                await asyncio.sleep(0.5)
-
-    except websockets.exceptions.ConnectionClosed:
-        print("❌ Koneksi terputus")
-    except KeyboardInterrupt:
-        print("⏹ Dihentikan")
+                elapsed = loop.time() - frame_start
+                sleep_time = FRAME_INTERVAL_SEC - elapsed
+                if sleep_time > 0:
+                    await asyncio.sleep(sleep_time)
     finally:
         cap.release()
         cv2.destroyAllWindows()
 
-asyncio.run(simulate())
+
+if __name__ == "__main__":
+    asyncio.run(simulate())
