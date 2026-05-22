@@ -57,7 +57,7 @@ function Skeleton({ className = "" }) {
 }
 
 // ── Empty State ────────────────────────────────────────────
-function EmptyState({ label = "No data available" }) {
+function EmptyState({ label = "Belum ada data" }) {
   return (
     <div className="flex flex-col items-center justify-center h-40 text-slate-400 gap-2">
       <Activity size={32} strokeWidth={1.5} />
@@ -164,7 +164,7 @@ function CustomTooltip({ active, payload, label }) {
 
 // ── Top Violations Table ───────────────────────────────────
 function TopViolations({ data }) {
-  if (!data?.length) return <EmptyState label="No violation data" />;
+  if (!data?.length) return <EmptyState label="Belum ada data pelanggaran" />;
   const max = Math.max(...data.map((d) => d.count));
 
   return (
@@ -251,8 +251,8 @@ function buildStackedData(weeklyTrend = []) {
   return transformWeeklyTrend(weeklyTrend).map((d) => {
     return {
       day: d.day,
-      Approved: d.approved,
-      Rejected: d.rejected,
+      Disetujui: d.approved,
+      Ditolak: d.rejected,
       Pending: d.pending,
     };
   });
@@ -263,21 +263,21 @@ function buildInsights({
   pending,
   total,
   peakDay,
-  complianceRate,
+  validationRate,
 }) {
   const ins = [];
   if (trendChange > 0)
-    ins.push(`⚠️ Pelanggaran naik ${trendChange}% vs kemarin`);
+    ins.push(`Pelanggaran naik ${trendChange}% dibanding hari sebelumnya`);
   if (trendChange < 0)
-    ins.push(`✅ Pelanggaran turun ${Math.abs(trendChange)}% vs kemarin`);
-  if (pending > total * 0.3) ins.push(`⏳ ${pending} kasus belum divalidasi`);
-  if (complianceRate >= 80)
-    ins.push(`🏆 Compliance rate tinggi: ${complianceRate}%`);
+    ins.push(`Pelanggaran turun ${Math.abs(trendChange)}% dibanding hari sebelumnya`);
+  if (pending > total * 0.3) ins.push(`${pending} kasus masih menunggu validasi`);
+  if (validationRate >= 80)
+    ins.push(`Tingkat validasi tinggi: ${validationRate}%`);
   if (peakDay)
     ins.push(
-      `📈 Puncak minggu ini: ${peakDay.day} (${peakDay.violations} kasus)`,
+      `Puncak pelanggaran: ${peakDay.day} (${peakDay.violations} kasus)`,
     );
-  if (!ins.length) ins.push("📊 Semua metrik dalam batas normal");
+  if (!ins.length) ins.push("Semua metrik berada dalam batas normal");
   return ins;
 }
 
@@ -300,9 +300,10 @@ export default function StatisticsPage({
   const pending = stats.by_status?.pending ?? 0;
   const totalRef = totalAll || 1; // avoid div/0
 
+  const validationRate = stats.validationRate ?? stats.complianceRate ?? "0";
   const approvedRate = ((approved / totalRef) * 100).toFixed(1);
   const rejectionRate = ((rejected / totalRef) * 100).toFixed(1);
-  const complianceRate = parseFloat(approvedRate);
+  const validationRateNumber = parseFloat(validationRate);
 
   // ── Transformed Chart Data ──
   const trendData = useMemo(
@@ -342,13 +343,13 @@ export default function StatisticsPage({
         pending,
         total: totalAll,
         peakDay,
-        complianceRate,
+        validationRate: validationRateNumber,
         peakHour: hourlyBreakdown.reduce(
           (mx, h) => (h.count > (mx?.count ?? 0) ? h : mx),
           null,
         ),
       }),
-    [trendChange, pending, totalAll, peakDay, complianceRate, hourlyBreakdown],
+    [trendChange, pending, totalAll, peakDay, validationRateNumber, hourlyBreakdown],
   );
 
   // ── Trend Icon ──
@@ -364,7 +365,7 @@ export default function StatisticsPage({
             Analytics K3
           </h1>
           <p className="text-xs text-slate-400 mt-0.5">
-            Safety Compliance Monitoring · Real-time
+            Monitoring incident APD dan proses validasi secara real-time
           </p>
         </div>
         {/* Time Range Filter (Moved from Dashboard header to here for better context) */}
@@ -382,7 +383,7 @@ export default function StatisticsPage({
           icon={Shield}
           label="Total Semua"
           value={totalAll.toLocaleString()}
-          sub="All time"
+          sub="Seluruh periode"
           color="slate"
           loading={loading}
         />
@@ -390,13 +391,13 @@ export default function StatisticsPage({
           icon={AlertTriangle}
           label="Hari Ini"
           value={totalToday.toLocaleString()}
-          sub="Today's detections"
+          sub="Deteksi hari ini"
           color="red"
           loading={loading}
         />
         <KpiCard
           icon={CheckCircle}
-          label="Approved Rate"
+          label="Tingkat Disetujui"
           value={`${approvedRate}%`}
           sub={`${approved} kasus`}
           color="green"
@@ -404,7 +405,7 @@ export default function StatisticsPage({
         />
         <KpiCard
           icon={XCircle}
-          label="Rejection Rate"
+          label="Tingkat Ditolak"
           value={`${rejectionRate}%`}
           sub={`${rejected} kasus`}
           color="rose"
@@ -412,7 +413,7 @@ export default function StatisticsPage({
         />
         <KpiCard
           icon={Clock}
-          label="Pending Review"
+          label="Menunggu Validasi"
           value={pending.toLocaleString()}
           sub="Belum divalidasi"
           color="yellow"
@@ -567,7 +568,7 @@ export default function StatisticsPage({
         <ChartCard
           className="lg:col-span-2"
           title="Distribusi Status"
-          subtitle="Breakdown approved / rejected / pending per hari"
+          subtitle="Rincian status approved, rejected, dan pending per hari"
           loading={loading}
         >
           {stackedData.length === 0 ? (
@@ -601,13 +602,13 @@ export default function StatisticsPage({
                   formatter={(v) => <span className="text-slate-500">{v}</span>}
                 />
                 <Bar
-                  dataKey="Approved"
+                  dataKey="Disetujui"
                   stackId="s"
                   fill={PALETTE.approved}
                   radius={[0, 0, 0, 0]}
                 />
                 <Bar
-                  dataKey="Rejected"
+                  dataKey="Ditolak"
                   stackId="s"
                   fill={PALETTE.rejected}
                   radius={[0, 0, 0, 0]}
@@ -636,10 +637,10 @@ export default function StatisticsPage({
             <div className="mt-5 pt-4 border-t border-slate-100 grid grid-cols-2 gap-3">
               <div className="bg-emerald-50 rounded-xl p-3 text-center">
                 <p className="text-xs text-emerald-600 font-semibold mb-0.5">
-                  Compliance
+                  Validasi
                 </p>
                 <p className="text-lg font-extrabold text-emerald-700">
-                  {approvedRate}%
+                  {validationRate}%
                 </p>
               </div>
               <div className="bg-red-50 rounded-xl p-3 text-center">

@@ -8,3 +8,28 @@ html { scroll-behavior: smooth; }
 
 /* Remove default body margin */
 body { margin: 0; }
+
+.dark body { background: #020617; }
+.dark .bg-white { background-color: #0f172a !important; }
+.dark .bg-gray-50 { background-color: #020617 !important; }
+.dark .bg-gray-100 { background-color: #1e293b !important; }
+.dark .bg-slate-50 { background-color: #111827 !important; }
+.dark .bg-slate-100 { background-color: #1e293b !important; }
+.dark .border-gray-100,
+.dark .border-slate-100,
+.dark .border-gray-50 { border-color: #1e293b !important; }
+.dark .text-gray-900,
+.dark .text-slate-900 { color: #f8fafc !important; }
+.dark .text-gray-800,
+.dark .text-slate-800,
+.dark .text-gray-700,
+.dark .text-slate-700 { color: #e2e8f0 !important; }
+.dark .text-gray-600,
+.dark .text-slate-600,
+.dark .text-gray-500,
+.dark .text-slate-500 { color: #cbd5e1 !important; }
+.dark .text-gray-400,
+.dark .text-slate-400 { color: #94a3b8 !important; }
+.dark input,
+.dark select,
+.dark textarea { color: #e2e8f0; }

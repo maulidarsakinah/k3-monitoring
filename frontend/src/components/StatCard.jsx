@@ -1,7 +1,7 @@
 // ============================================================
 // StatCard.jsx
 // A single dark navy summary card showing a label and value.
-// Used for: Total Violations, Compliance %, Pending Validasi.
+// Used for: Total Violations, validation rate, pending validation.
 // ============================================================
 
 export default function StatCard({ label, value }) {

@@ -21,11 +21,29 @@ import {
   CheckCircle,
   ChevronLeft,
   ChevronRight,
+  MessageSquare,
 } from "lucide-react";
+import ViolationBadges from "./common/ViolationBadges.jsx";
+
+const COMMENT_KEY = "violation_internal_comments";
+
+function loadComments() {
+  try {
+    return JSON.parse(localStorage.getItem(COMMENT_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function saveComments(comments) {
+  localStorage.setItem(COMMENT_KEY, JSON.stringify(comments));
+}
 
 export default function HistoryPage({ historyLog, selectedId = null }) {
   // Which row's detail panel is open (null = none)
   const [detailId, setDetailId] = useState(selectedId);
+  const [comments, setComments] = useState(loadComments);
+  const [commentDraft, setCommentDraft] = useState("");
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -43,6 +61,25 @@ export default function HistoryPage({ historyLog, selectedId = null }) {
 
   // Find the currently selected record
   const selected = historyLog.find((r) => r.id === detailId) ?? null;
+  const selectedComments = selected ? comments[selected.id] || [] : [];
+
+  const addComment = () => {
+    if (!selected || !commentDraft.trim()) return;
+    const next = {
+      ...comments,
+      [selected.id]: [
+        ...(comments[selected.id] || []),
+        {
+          id: Date.now(),
+          text: commentDraft.trim(),
+          createdAt: new Date().toLocaleString("id-ID"),
+        },
+      ],
+    };
+    setComments(next);
+    saveComments(next);
+    setCommentDraft("");
+  };
 
   // Pagination logic
   const totalPages = Math.ceil(historyLog.length / itemsPerPage);
@@ -54,6 +91,11 @@ export default function HistoryPage({ historyLog, selectedId = null }) {
     Notified: "bg-blue-100   text-blue-800",
     "Warning Issued": "bg-orange-100 text-orange-800",
     Dismissed: "bg-gray-100   text-gray-600",
+    Pending: "bg-yellow-100 text-yellow-800",
+    Detected: "bg-blue-100 text-blue-800",
+    "Staff Reviewed": "bg-slate-100 text-slate-700",
+    "Needs Manager": "bg-violet-100 text-violet-800",
+    Validated: "bg-green-100 text-green-800",
   };
 
   // Icon per action for the detail panel
@@ -61,6 +103,8 @@ export default function HistoryPage({ historyLog, selectedId = null }) {
     Notified: <CheckCircle size={15} className="text-blue-500" />,
     "Warning Issued": <AlertTriangle size={15} className="text-orange-500" />,
     Dismissed: <X size={15} className="text-gray-400" />,
+    Pending: <AlertTriangle size={15} className="text-yellow-500" />,
+    Validated: <CheckCircle size={15} className="text-green-500" />,
   };
 
   return (
@@ -118,17 +162,7 @@ export default function HistoryPage({ historyLog, selectedId = null }) {
                       {row.time}
                     </td>
                     <td className="py-3 pr-4 text-gray-700">
-                      <div className="flex flex-wrap gap-1.5">
-                        {row.violation.split(", ").map((v, i) => (
-                          <span
-                            key={i}
-                            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-100 text-[10px] font-bold uppercase whitespace-nowrap"
-                          >
-                            <span className="w-1 h-1 rounded-full bg-red-500" />
-                            {v}
-                          </span>
-                        ))}
-                      </div>
+                <ViolationBadges value={row.violation} layout="list" />
                     </td>
                     <td className="py-3 pr-4 text-gray-500 font-mono text-xs">
                       {row.camera}
@@ -221,12 +255,22 @@ export default function HistoryPage({ historyLog, selectedId = null }) {
             </button>
           </div>
 
-          {/* ── Photo Evidence — CCTV snapshot placeholder ── */}
-          <div className="relative bg-[#0d1b2a] h-44 flex flex-col items-center justify-center gap-2">
-            <Camera size={36} className="text-white/20" />
-            <span className="text-white/40 text-[10px]">
-              BUKTI SNAPSHOT CCTV
-            </span>
+          {/* ── Photo Evidence ── */}
+          <div className="relative bg-[#0d1b2a] h-44 flex flex-col items-center justify-center gap-2 overflow-hidden">
+            {selected.evidenceUrl ? (
+              <img
+                src={selected.evidenceUrl}
+                alt={`Bukti pelanggaran ${selected.camera}`}
+                className="w-full h-full object-contain"
+              />
+            ) : (
+              <>
+                <Camera size={36} className="text-white/20" />
+                <span className="text-white/40 text-[10px]">
+                  BUKTI BELUM TERSEDIA
+                </span>
+              </>
+            )}
 
             {/* Camera ID badge top-left */}
             <span className="absolute top-3 left-3 text-xs font-mono text-white/70 bg-white/10 px-2 py-0.5 rounded">
@@ -251,16 +295,45 @@ export default function HistoryPage({ historyLog, selectedId = null }) {
               />
               <div>
                 <p className="text-xs text-gray-400 mb-0.5">Tipe Pelanggaran</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {selected.violation.split(", ").map((v, i) => (
-                    <span
-                      key={i}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-red-50 text-red-700 border border-red-100 text-[10px] font-bold rounded-full uppercase"
-                    >
-                      <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
-                      {v}
-                    </span>
-                  ))}
+                <ViolationBadges value={selected.violation} layout="list" />
+              </div>
+            </div>
+
+            <div className="rounded-lg bg-slate-50 border border-slate-100 px-3 py-3">
+              <p className="text-xs font-bold uppercase text-gray-400 mb-3">
+                Alur Pelanggaran
+              </p>
+              <div className="space-y-3 text-xs">
+                <div className="flex gap-2">
+                  <span className="w-5 h-5 rounded-full bg-red-100 text-red-700 flex items-center justify-center font-bold">1</span>
+                  <div>
+                    <p className="font-bold text-gray-800">Terdeteksi kamera</p>
+                    <p className="text-gray-500">{selected.date} {selected.time}</p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <span className="w-5 h-5 rounded-full bg-violet-100 text-violet-700 flex items-center justify-center font-bold">2</span>
+                  <div>
+                    <p className="font-bold text-gray-800">
+                      {selected.reportSentBy ? "Dikirim staff" : "Belum dikirim staff"}
+                    </p>
+                    <p className="text-gray-500">
+                      {selected.reportSentBy
+                        ? `${selected.reportSentBy} - ${selected.reportSentAt}`
+                        : "Menunggu staff operasional"}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">3</span>
+                  <div>
+                    <p className="font-bold text-gray-800">
+                      {selected.validatedBy ? "Divalidasi manager" : "Belum divalidasi"}
+                    </p>
+                    <p className="text-gray-500">
+                      {selected.validatedBy || "Menunggu keputusan manager"}
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
@@ -271,7 +344,7 @@ export default function HistoryPage({ historyLog, selectedId = null }) {
               <div>
                 <p className="text-xs text-gray-400 mb-0.5">Timestamp</p>
                 <p className="text-sm font-semibold text-gray-800">
-                  {selected.date}, {selected.time}
+                  {selected.summary || selected.date + ", " + selected.time}
                 </p>
               </div>
             </div>
@@ -302,6 +375,53 @@ export default function HistoryPage({ historyLog, selectedId = null }) {
                   {selected.action}
                 </span>
               </div>
+            </div>
+
+            {selected.validatedBy && (
+              <div className="rounded-lg bg-slate-50 border border-slate-100 px-3 py-2">
+                <p className="text-xs text-gray-400 mb-1">Validasi</p>
+                <p className="text-xs font-semibold text-gray-700">
+                  Oleh {selected.validatedBy}
+                </p>
+                {selected.note && (
+                  <p className="text-xs text-gray-500 mt-1">{selected.note}</p>
+                )}
+              </div>
+            )}
+
+            <div className="rounded-lg bg-slate-50 border border-slate-100 px-3 py-3">
+              <div className="flex items-center gap-2 mb-3">
+                <MessageSquare size={15} className="text-violet-500" />
+                <p className="text-xs font-bold uppercase text-gray-400">
+                  Komentar Internal
+                </p>
+              </div>
+              <div className="space-y-2 mb-3">
+                {selectedComments.map((comment) => (
+                  <div key={comment.id} className="rounded-lg bg-white border border-slate-100 px-3 py-2">
+                    <p className="text-xs text-gray-700">{comment.text}</p>
+                    <p className="text-[10px] text-gray-400 mt-1">{comment.createdAt}</p>
+                  </div>
+                ))}
+                {selectedComments.length === 0 && (
+                  <p className="text-xs text-gray-400">
+                    Belum ada komentar.
+                  </p>
+                )}
+              </div>
+              <textarea
+                value={commentDraft}
+                onChange={(event) => setCommentDraft(event.target.value)}
+                rows={2}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs outline-none"
+                placeholder="Tulis komentar internal..."
+              />
+              <button
+                onClick={addComment}
+                className="mt-2 w-full h-8 rounded-lg bg-violet-600 text-white text-xs font-bold"
+              >
+                Simpan Komentar
+              </button>
             </div>
           </div>
         </div>

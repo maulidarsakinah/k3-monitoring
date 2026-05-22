@@ -1,13 +1,12 @@
-// ============================================================
-// TodayViolations.jsx
-// Table showing today's violations with Waktu, Pelanggaran,
-// and a "Lihat" (View) action button — matching the homepage.
-// ============================================================
+import ViolationBadges from "./common/ViolationBadges.jsx";
 
 export default function TodayViolations({ violations, onViewDetail }) {
   // Map status to badge styles
   const statusStyle = {
+    Detected: "bg-blue-100 text-blue-800",
     Pending: "bg-yellow-100 text-yellow-800",
+    "Staff Reviewed": "bg-slate-100 text-slate-700",
+    "Needs Manager": "bg-violet-100 text-violet-800",
     Validated: "bg-green-100  text-green-800",
     Dismissed: "bg-gray-100   text-gray-600",
   };
@@ -22,6 +21,12 @@ export default function TodayViolations({ violations, onViewDetail }) {
             </th>
             <th className="pb-3 text-left text-blue-500 font-semibold pr-4">
               Pelanggaran
+            </th>
+            <th className="pb-3 text-left text-blue-500 font-semibold pr-4 w-28">
+              Kamera
+            </th>
+            <th className="pb-3 text-left text-blue-500 font-semibold pr-4 w-28">
+              Status
             </th>
             <th className="pb-3 text-left text-blue-500 font-semibold w-36">
               Aksi
@@ -42,17 +47,19 @@ export default function TodayViolations({ violations, onViewDetail }) {
 
               {/* Violation type with Badges */}
               <td className="py-4 pr-4">
-                <div className="flex flex-wrap gap-1.5">
-                  {(row.pelanggaran || "").split(", ").map((v, i) => (
-                    <span
-                      key={i}
-                      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-100 text-[10px] font-bold uppercase whitespace-nowrap"
-                    >
-                      <span className="w-1 h-1 rounded-full bg-red-500" />
-                      {v}
-                    </span>
-                  ))}
-                </div>
+                <ViolationBadges value={row.pelanggaran} />
+              </td>
+
+              <td className="py-4 pr-4 text-gray-500 font-mono text-xs">
+                {row.kamera}
+              </td>
+
+              <td className="py-4 pr-4">
+                <span
+                  className={`text-xs font-semibold px-3 py-1 rounded-full ${statusStyle[row.status] ?? "bg-gray-100 text-gray-600"}`}
+                >
+                  {row.status}
+                </span>
               </td>
 
               {/* Action button */}
