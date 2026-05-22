@@ -33,6 +33,7 @@ export function mapViolations(apiData = []) {
     pelanggaran: (item.violations || []).join(", "),
     kamera: item.camera_id,
     status: STATUS_LABEL[item.status] || item.status || "Pending",
+    severity: item.severity || "none",
   }));
 }
 
@@ -50,6 +51,7 @@ export function mapHistory(apiData = []) {
       violation: (item.violations || []).join(", "),
       camera: item.camera_id,
       action: STATUS_LABEL[item.status] || item.status || "Pending",
+      severity: item.severity || "none",
       summary: item.summary,
       validatedBy: item.validated_by,
       validatedAt: item.validated_at,
@@ -99,6 +101,7 @@ export function mapValidationQueue(apiData = []) {
     timestamp: item.timestamp,
     rawStatus: item.status || "detected",
     status: STATUS_LABEL[item.status] || item.status || "Pending",
+    severity: item.severity || "none",
   }));
 }
 

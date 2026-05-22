@@ -7,6 +7,13 @@ const TIME_RANGES = [
   { id: "custom", label: "Kustom" },
 ];
 
+const SEVERITY_OPTIONS = [
+  { value: "", label: "Semua Severity" },
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+];
+
 export default function AppHeader({
   activePage,
   cameraBreakdown,
@@ -20,10 +27,12 @@ export default function AppHeader({
   onRefresh,
   searchQuery,
   selectedCamera,
+  selectedSeverity,
   setCustomEndDate,
   setCustomStartDate,
   setSearchQuery,
   setSelectedCamera,
+  setSelectedSeverity,
   setTimeRange,
   timeRange,
   unreadCount,
@@ -74,6 +83,18 @@ export default function AppHeader({
         {cameraBreakdown.map((camera) => (
           <option key={camera.camera} value={camera.camera}>
             {camera.camera}
+          </option>
+        ))}
+      </select>
+
+      <select
+        value={selectedSeverity}
+        onChange={(event) => setSelectedSeverity(event.target.value)}
+        className="text-[10px] bg-gray-100 border-none rounded-lg px-3 py-2 mr-2 outline-none font-bold text-gray-600"
+      >
+        {SEVERITY_OPTIONS.map((item) => (
+          <option key={item.value} value={item.value}>
+            {item.label}
           </option>
         ))}
       </select>

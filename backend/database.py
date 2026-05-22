@@ -15,6 +15,19 @@ def _normalize_end_date(end_date: str = None) -> str:
     return end_date
 
 
+def _date_range_start(date_range: str = None) -> str | None:
+    if not date_range:
+        return None
+    now = datetime.now()
+    if date_range == "today":
+        return now.strftime("%Y-%m-%dT00:00:00")
+    if date_range == "weekly":
+        return (now - timedelta(days=7)).isoformat()
+    if date_range == "monthly":
+        return (now - timedelta(days=30)).isoformat()
+    return None
+
+
 class ViolationDatabase:
     def __init__(self, db_path: str = DB_PATH):
         self.db_path = db_path
@@ -32,6 +45,7 @@ class ViolationDatabase:
                     timestamp       TEXT NOT NULL,
                     violations      TEXT NOT NULL,
                     summary         TEXT,
+                    severity        TEXT DEFAULT 'none',
                     status          TEXT DEFAULT 'pending',
                     validated_by    TEXT,
                     validated_at    TEXT,
@@ -46,6 +60,7 @@ class ViolationDatabase:
             columns = [row[1] for row in conn.execute("PRAGMA table_info(violations)").fetchall()]
             extra_columns = {
                 "evidence_path": "TEXT",
+                "severity": "TEXT DEFAULT 'none'",
                 "report_sent_by": "TEXT",
                 "report_sent_at": "TEXT",
                 "report_note": "TEXT",
@@ -65,6 +80,7 @@ class ViolationDatabase:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_camera_id ON violations (camera_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON violations (timestamp)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_status ON violations (status)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_severity ON violations (severity)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_incident_key ON violations (incident_key)")
             conn.commit()
 
@@ -99,23 +115,33 @@ class ViolationDatabase:
                     conn.execute(
                         """UPDATE violations
                            SET last_detected_at=?, occurrence_count=?, confidence_avg=?,
-                               confidence_max=?, summary=?, evidence_path=COALESCE(?, evidence_path)
+                               confidence_max=?, summary=?, severity=?, evidence_path=COALESCE(?, evidence_path)
                            WHERE id=?""",
-                        (timestamp, count, next_avg, next_max, result.summary, evidence_path, existing["id"]),
+                        (
+                            timestamp,
+                            count,
+                            next_avg,
+                            next_max,
+                            result.summary,
+                            result.severity,
+                            evidence_path,
+                            existing["id"],
+                        ),
                     )
                 else:
                     conn.execute(
                         """INSERT INTO violations (
-                               camera_id, timestamp, violations, summary, status, evidence_path,
+                               camera_id, timestamp, violations, summary, severity, status, evidence_path,
                                first_detected_at, last_detected_at, occurrence_count,
                                confidence_avg, confidence_max, incident_key
                            )
-                           VALUES (?, ?, ?, ?, 'detected', ?, ?, ?, 1, ?, ?, ?)""",
+                           VALUES (?, ?, ?, ?, ?, 'detected', ?, ?, ?, 1, ?, ?, ?)""",
                         (
                             result.camera_id,
                             timestamp,
                             json.dumps(result.violations),
                             result.summary,
+                            result.severity,
                             evidence_path,
                             timestamp,
                             timestamp,
@@ -128,12 +154,16 @@ class ViolationDatabase:
         except Exception as e:
             logger.error(f"Gagal menyimpan log: {e}")
 
-    def get_violations(self, limit: int = 50, camera_id: str = None,
-                       start_date: str = None, end_date: str = None,
-                       status: str = None) -> list[dict]:
+    def _build_where(self, camera_id: str = None, start_date: str = None,
+                     end_date: str = None, status: str = None,
+                     severity: str = None, date_range: str = None) -> tuple[str, list]:
         end_date = _normalize_end_date(end_date)
-        query = "SELECT * FROM violations WHERE 1=1"
+        range_start = _date_range_start(date_range)
+        query = " WHERE 1=1"
         params = []
+        if range_start:
+            query += " AND timestamp >= ?"
+            params.append(range_start)
         if camera_id:
             query += " AND camera_id = ?"
             params.append(camera_id)
@@ -146,13 +176,51 @@ class ViolationDatabase:
         if status:
             query += " AND status = ?"
             params.append(status)
-        query += " ORDER BY timestamp DESC LIMIT ?"
-        params.append(limit)
+        if severity:
+            query += " AND severity = ?"
+            params.append(severity)
+        return query, params
+
+    def get_violations(self, limit: int = 50, camera_id: str = None,
+                       start_date: str = None, end_date: str = None,
+                       status: str = None, page: int | None = None,
+                       severity: str = None, date_range: str = None):
+        where, params = self._build_where(
+            camera_id=camera_id,
+            start_date=start_date,
+            end_date=end_date,
+            status=status,
+            severity=severity,
+            date_range=date_range,
+        )
+
+        with self._get_conn() as conn:
+            total = conn.execute(f"SELECT COUNT(*) FROM violations{where}", params).fetchone()[0]
+
+        if page is None:
+            query = f"SELECT * FROM violations{where} ORDER BY timestamp DESC LIMIT ?"
+            query_params = params + [limit]
+        else:
+            offset = (page - 1) * limit
+            query = f"SELECT * FROM violations{where} ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+            query_params = params + [limit, offset]
 
         with self._get_conn() as conn:
             conn.row_factory = sqlite3.Row
-            rows = conn.execute(query, params).fetchall()
-        return [self._row_to_dict(r) for r in rows]
+            rows = conn.execute(query, query_params).fetchall()
+
+        mapped = [self._row_to_dict(r) for r in rows]
+        if page is None:
+            return mapped
+
+        total_pages = (total + limit - 1) // limit if total > 0 else 1
+        return {
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "total_pages": total_pages,
+            "violations": mapped,
+        }
 
     def get_violation_by_id(self, violation_id: int) -> dict:
         with self._get_conn() as conn:
@@ -210,16 +278,14 @@ class ViolationDatabase:
             conn.commit()
         return affected > 0
 
-    def get_stats(self, start_date: str = None, end_date: str = None) -> dict:
-        end_date = _normalize_end_date(end_date)
-        params_filter = []
-        where = " WHERE 1=1"
-        if start_date:
-            where += " AND timestamp >= ?"
-            params_filter.append(start_date)
-        if end_date:
-            where += " AND timestamp <= ?"
-            params_filter.append(end_date)
+    def get_stats(self, start_date: str = None, end_date: str = None,
+                  severity: str = None, date_range: str = None) -> dict:
+        where, params_filter = self._build_where(
+            start_date=start_date,
+            end_date=end_date,
+            severity=severity,
+            date_range=date_range,
+        )
 
         with self._get_conn() as conn:
             total = conn.execute(f"SELECT COUNT(*) FROM violations{where}", params_filter).fetchone()[0]
@@ -242,6 +308,9 @@ class ViolationDatabase:
             rejected = conn.execute(
                 f"SELECT COUNT(*) FROM violations{where} AND status='rejected'", params_filter
             ).fetchone()[0]
+            severity_rows = conn.execute(
+                f"SELECT severity, COUNT(*) FROM violations{where} GROUP BY severity", params_filter
+            ).fetchall()
             rows = conn.execute(f"SELECT violations FROM violations{where}", params_filter).fetchall()
 
         violation_counts: dict[str, int] = {}
@@ -260,48 +329,47 @@ class ViolationDatabase:
                 "approved": approved,
                 "rejected": rejected,
             },
+            "by_severity": {row[0] or "none": row[1] for row in severity_rows},
             "violation_breakdown": violation_counts,
-            "filter": {"start_date": start_date, "end_date": end_date},
+            "filter": {
+                "start_date": start_date,
+                "end_date": end_date,
+                "severity": severity,
+                "date_range": date_range,
+            },
         }
 
     def get_trend(self, start_date: str = None, end_date: str = None,
-                  camera_id: str = None) -> list[dict]:
-        end_date = _normalize_end_date(end_date)
-        query = "SELECT DATE(timestamp) as date, COUNT(*) as count FROM violations WHERE 1=1"
-        params = []
-        if start_date:
-            query += " AND timestamp >= ?"
-            params.append(start_date)
-        if end_date:
-            query += " AND timestamp <= ?"
-            params.append(end_date)
-        if camera_id:
-            query += " AND camera_id = ?"
-            params.append(camera_id)
-        query += " GROUP BY DATE(timestamp) ORDER BY date ASC"
+                  camera_id: str = None, date_range: str = None) -> list[dict]:
+        where, params = self._build_where(
+            camera_id=camera_id,
+            start_date=start_date,
+            end_date=end_date,
+            date_range=date_range,
+        )
+        query = f"""
+            SELECT DATE(timestamp) as date, COUNT(*) as count
+            FROM violations{where}
+            GROUP BY DATE(timestamp)
+            ORDER BY date ASC
+        """
         with self._get_conn() as conn:
             rows = conn.execute(query, params).fetchall()
         return [{"date": r[0], "count": r[1]} for r in rows]
 
     def get_all_for_export(self, start_date: str = None, end_date: str = None,
-                           camera_id: str = None, status: str = None) -> list[dict]:
+                           camera_id: str = None, status: str = None,
+                           severity: str = None, date_range: str = None) -> list[dict]:
         """Ambil semua data tanpa limit untuk export."""
-        end_date = _normalize_end_date(end_date)
-        query = "SELECT * FROM violations WHERE 1=1"
-        params = []
-        if start_date:
-            query += " AND timestamp >= ?"
-            params.append(start_date)
-        if end_date:
-            query += " AND timestamp <= ?"
-            params.append(end_date)
-        if camera_id:
-            query += " AND camera_id = ?"
-            params.append(camera_id)
-        if status:
-            query += " AND status = ?"
-            params.append(status)
-        query += " ORDER BY timestamp DESC"
+        where, params = self._build_where(
+            camera_id=camera_id,
+            start_date=start_date,
+            end_date=end_date,
+            status=status,
+            severity=severity,
+            date_range=date_range,
+        )
+        query = f"SELECT * FROM violations{where} ORDER BY timestamp DESC"
         with self._get_conn() as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(query, params).fetchall()
@@ -315,6 +383,7 @@ class ViolationDatabase:
         d["occurrence_count"] = d.get("occurrence_count") or 1
         d["confidence_avg"] = d.get("confidence_avg") or 0
         d["confidence_max"] = d.get("confidence_max") or 0
+        d["severity"] = d.get("severity") or "none"
         return d
 
     def _incident_key(self, camera_id: str, violations: list[str]) -> str:

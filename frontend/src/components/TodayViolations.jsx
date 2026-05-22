@@ -10,6 +10,12 @@ export default function TodayViolations({ violations, onViewDetail }) {
     Validated: "bg-green-100  text-green-800",
     Dismissed: "bg-gray-100   text-gray-600",
   };
+  const severityStyle = {
+    none: "bg-slate-100 text-slate-500",
+    low: "bg-emerald-100 text-emerald-700",
+    medium: "bg-amber-100 text-amber-700",
+    high: "bg-red-100 text-red-700",
+  };
 
   return (
     <>
@@ -27,6 +33,9 @@ export default function TodayViolations({ violations, onViewDetail }) {
             </th>
             <th className="pb-3 text-left text-blue-500 font-semibold pr-4 w-28">
               Status
+            </th>
+            <th className="pb-3 text-left text-blue-500 font-semibold pr-4 w-24">
+              Severity
             </th>
             <th className="pb-3 text-left text-blue-500 font-semibold w-36">
               Aksi
@@ -59,6 +68,14 @@ export default function TodayViolations({ violations, onViewDetail }) {
                   className={`text-xs font-semibold px-3 py-1 rounded-full ${statusStyle[row.status] ?? "bg-gray-100 text-gray-600"}`}
                 >
                   {row.status}
+                </span>
+              </td>
+
+              <td className="py-4 pr-4">
+                <span
+                  className={`text-xs font-bold px-2.5 py-1 rounded-full uppercase ${severityStyle[row.severity] ?? severityStyle.none}`}
+                >
+                  {row.severity || "none"}
                 </span>
               </td>
 

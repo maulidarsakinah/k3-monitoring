@@ -97,6 +97,12 @@ export default function HistoryPage({ historyLog, selectedId = null }) {
     "Needs Manager": "bg-violet-100 text-violet-800",
     Validated: "bg-green-100 text-green-800",
   };
+  const severityStyle = {
+    none: "bg-slate-100 text-slate-500",
+    low: "bg-emerald-100 text-emerald-700",
+    medium: "bg-amber-100 text-amber-700",
+    high: "bg-red-100 text-red-700",
+  };
 
   // Icon per action for the detail panel
   const actionIcon = {
@@ -139,6 +145,9 @@ export default function HistoryPage({ historyLog, selectedId = null }) {
                 <th className="pb-3 text-left text-blue-500 font-semibold pr-4 w-36">
                   Tindakan
                 </th>
+                <th className="pb-3 text-left text-blue-500 font-semibold pr-4 w-24">
+                  Severity
+                </th>
                 <th className="pb-3 text-left text-blue-500 font-semibold w-24">
                   Detail
                 </th>
@@ -172,6 +181,14 @@ export default function HistoryPage({ historyLog, selectedId = null }) {
                         className={`text-xs font-semibold px-3 py-1 rounded-full ${actionStyle[row.action] ?? "bg-gray-100 text-gray-600"}`}
                       >
                         {row.action}
+                      </span>
+                    </td>
+
+                    <td className="py-3 pr-4">
+                      <span
+                        className={`text-xs font-bold px-2.5 py-1 rounded-full uppercase ${severityStyle[row.severity] ?? severityStyle.none}`}
+                      >
+                        {row.severity || "none"}
                       </span>
                     </td>
 
@@ -335,6 +352,22 @@ export default function HistoryPage({ historyLog, selectedId = null }) {
                     </p>
                   </div>
                 </div>
+              </div>
+            </div>
+
+            {/* Timestamp */}
+            <div className="flex items-start gap-3">
+              <AlertTriangle
+                size={16}
+                className="text-amber-400 mt-0.5 shrink-0"
+              />
+              <div>
+                <p className="text-xs text-gray-400 mb-1">Severity</p>
+                <span
+                  className={`text-xs font-bold px-2.5 py-1 rounded-full uppercase ${severityStyle[selected.severity] ?? severityStyle.none}`}
+                >
+                  {selected.severity || "none"}
+                </span>
               </div>
             </div>
 

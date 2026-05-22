@@ -218,9 +218,20 @@ export default function ReportsPage({
                       </span>
                     </td>
                     <td className="py-3 text-xs text-slate-500">
-                      Deteksi
-                      {item.reportSentBy ? ` -> dikirim ${item.reportSentBy}` : " -> belum dikirim"}
-                      {item.validatedBy ? ` -> validasi ${item.validatedBy}` : " -> belum divalidasi"}
+                      <div className="space-y-1">
+                        <p>
+                          <span className="font-semibold text-slate-700">Deteksi:</span>{" "}
+                          tercatat
+                        </p>
+                        <p>
+                          <span className="font-semibold text-slate-700">Laporan:</span>{" "}
+                          {item.reportSentBy ? `dikirim ${item.reportSentBy}` : "belum dikirim"}
+                        </p>
+                        <p>
+                          <span className="font-semibold text-slate-700">Validasi:</span>{" "}
+                          {item.validatedBy ? `oleh ${item.validatedBy}` : "belum divalidasi"}
+                        </p>
+                      </div>
                     </td>
                   </tr>
                 ))}

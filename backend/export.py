@@ -12,7 +12,7 @@ def export_csv(data: list[dict]) -> bytes:
     output = io.StringIO()
     fieldnames = [
         "id", "camera_id", "timestamp", "violations",
-        "summary", "status", "report_sent_by", "report_sent_at",
+        "summary", "severity", "status", "report_sent_by", "report_sent_at",
         "report_note", "validated_by", "validated_at", "validation_note",
         "staff_reviewed_by", "staff_reviewed_at", "staff_note",
         "first_detected_at", "last_detected_at", "occurrence_count",
@@ -115,6 +115,7 @@ def export_pdf(data: list[dict], title: str = "Laporan Pelanggaran APD") -> byte
             report_by = f"{report_by}\n{report_at}"
         incident_info = (
             f"{row.get('occurrence_count') or 1} kejadian\n"
+            f"Severity: {(row.get('severity') or 'none').upper()}\n"
             f"Conf max: {round((row.get('confidence_max') or 0) * 100)}%"
         )
 

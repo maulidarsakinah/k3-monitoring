@@ -6,7 +6,6 @@ import {
   History,
   LayoutDashboard,
   LogOut,
-  Settings,
   ShieldCheck,
   SlidersHorizontal,
   FileText,
@@ -23,7 +22,6 @@ export const NAV_ITEMS = [
   { label: "Validation", icon: ShieldCheck, page: "validation" },
   { label: "Reports", icon: FileText, page: "reports", roles: ["admin", "manager"] },
   { label: "Management", icon: SlidersHorizontal, page: "management", roles: ["admin", "manager"] },
-  { label: "Settings", icon: Settings, page: "settings" },
 ];
 
 function SidebarBrand() {

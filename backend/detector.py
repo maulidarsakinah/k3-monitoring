@@ -29,6 +29,22 @@ APD_CLASS_CONFIG = {
 
 VIOLATION_CONFIDENCE_THRESHOLD = 0.30
 
+SEVERITY_LEVELS = {
+    0: "none",
+    1: "low",
+    2: "medium",
+    3: "medium",
+}
+
+
+def calculate_severity(violations: list[str]) -> str:
+    count = len(violations)
+    if count == 0:
+        return "none"
+    if count >= 4:
+        return "high"
+    return SEVERITY_LEVELS.get(count, "medium")
+
 
 class APDDetector:
     def __init__(self, model_path: str = "best.pt"):
@@ -103,7 +119,8 @@ class APDDetector:
                 violations.append(mv)
 
         has_violation = len(violations) > 0
-        summary = self._build_summary(detections, violations)
+        severity = calculate_severity(violations)
+        summary = self._build_summary(detections, violations, severity)
 
         return DetectionResult(
             camera_id=camera_id,
@@ -112,6 +129,7 @@ class APDDetector:
             violations=violations,
             detections=detections,
             summary=summary,
+            severity=severity,
         )
 
     def _check_missing_apd(self, detections: list[Detection]) -> list[str]:
@@ -148,7 +166,7 @@ class APDDetector:
         }
         return labels.get(class_name, f"Pelanggaran: {class_name}")
 
-    def _build_summary(self, detections: list[Detection], violations: list[str]) -> str:
+    def _build_summary(self, detections: list[Detection], violations: list[str], severity: str) -> str:
         if not detections:
             return "Tidak ada objek terdeteksi"
         n_compliant = sum(
@@ -157,4 +175,5 @@ class APDDetector:
         )
         if not violations:
             return f"✅ APD Lengkap — {n_compliant} item APD terdeteksi"
-        return f"⚠️ {len(violations)} pelanggaran APD: {', '.join(violations)}"
+        severity_label = {"none": "", "low": "[LOW]", "medium": "[MEDIUM]", "high": "[HIGH]"}
+        return f"⚠️ {severity_label.get(severity, '')} {len(violations)} pelanggaran APD: {', '.join(violations)}"

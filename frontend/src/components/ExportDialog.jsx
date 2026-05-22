@@ -11,17 +11,26 @@ const STATUS_OPTIONS = [
   { value: "rejected", label: "Ditolak" },
 ];
 
+const SEVERITY_OPTIONS = [
+  { value: "", label: "Semua Severity" },
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+];
+
 export default function ExportDialog({
   cameras = [],
   exporting,
   onClose,
   onExport,
   selectedCamera,
+  selectedSeverity,
 }) {
   const [format, setFormat] = useState("csv");
   const [period, setPeriod] = useState("weekly");
   const [cameraId, setCameraId] = useState(selectedCamera || "");
   const [status, setStatus] = useState("");
+  const [severity, setSeverity] = useState(selectedSeverity || "");
   const [customStartDate, setCustomStartDate] = useState("");
   const [customEndDate, setCustomEndDate] = useState("");
   const [error, setError] = useState("");
@@ -42,6 +51,7 @@ export default function ExportDialog({
       ...dateRange,
       camera_id: cameraId,
       status,
+      severity,
     });
   };
 
@@ -169,6 +179,23 @@ export default function ExportDialog({
                 className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none"
               >
                 {STATUS_OPTIONS.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              <span className="text-xs font-bold uppercase text-slate-500">
+                Severity
+              </span>
+              <select
+                value={severity}
+                onChange={(event) => setSeverity(event.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none"
+              >
+                {SEVERITY_OPTIONS.map((item) => (
                   <option key={item.value} value={item.value}>
                     {item.label}
                   </option>

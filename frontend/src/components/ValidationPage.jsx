@@ -533,6 +533,9 @@ export default function ValidationPage({
                 <span className="text-xs font-bold bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full">
                   {selected.confidence}% confidence
                 </span>
+                <span className="text-xs font-bold bg-amber-50 text-amber-700 px-2.5 py-1 rounded-full uppercase">
+                  {selected.severity || "none"}
+                </span>
               </div>
 
               <EvidencePreview item={selected} />

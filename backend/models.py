@@ -18,6 +18,7 @@ class DetectionResult(BaseModel):
     violations: list[str]    # Daftar nama pelanggaran APD
     detections: list[Detection]
     summary: str
+    severity: str = "none"   # none / low / medium / high
 
 
 class ViolationLog(BaseModel):
@@ -26,6 +27,7 @@ class ViolationLog(BaseModel):
     timestamp: str
     violations: list[str]
     summary: str
+    severity: str = "none"
 
 
 class SystemStatus(BaseModel):
@@ -33,3 +35,11 @@ class SystemStatus(BaseModel):
     model_path: str
     classes: list[str]
     apd_classes: dict
+
+
+class PaginatedViolations(BaseModel):
+    total: int
+    page: int
+    limit: int
+    total_pages: int
+    violations: list[dict]

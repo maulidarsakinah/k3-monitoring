@@ -21,6 +21,7 @@ import auth
 import cameras as cam_module
 import rules as rule_module
 import export as export_module
+import stats as stats_module
 
 logger = logging.getLogger(__name__)
 
@@ -204,27 +205,44 @@ async def detect_from_base64(payload: dict, current_user=Depends(auth.require_al
 
 @app.get("/violations", tags=["Violations"])
 async def get_violations(
-    limit: int = 50,
+    page: int = Query(1, ge=1, description="Nomor halaman"),
+    limit: int = Query(50, ge=1, le=500, description="Jumlah data per halaman"),
     camera_id: str = None,
     start_date: str = None,
     end_date: str = None,
     status: str = Query(None, description="Filter: detected / staff_reviewed / needs_manager / approved / rejected"),
+    severity: str = Query(None, description="Filter: none / low / medium / high"),
+    date_range: str = Query(None, description="Shortcut: today / weekly / monthly"),
     current_user=Depends(auth.require_all)
 ):
     """Daftar pelanggaran dengan status workflow staff/manager."""
-    logs = db.get_violations(limit=limit, camera_id=camera_id,
-                             start_date=start_date, end_date=end_date, status=status)
-    return {"total": len(logs), "violations": logs}
+    return db.get_violations(
+        page=page,
+        limit=limit,
+        camera_id=camera_id,
+        start_date=start_date,
+        end_date=end_date,
+        status=status,
+        severity=severity,
+        date_range=date_range,
+    )
 
 
 @app.get("/violations/stats", tags=["Violations"])
 async def get_violation_stats(
     start_date: str = None,
     end_date: str = None,
+    severity: str = None,
+    date_range: str = Query(None, description="today / weekly / monthly"),
     current_user=Depends(auth.require_all)
 ):
     """Statistik tanpa bias limit. Bisa filter tanggal."""
-    return db.get_stats(start_date=start_date, end_date=end_date)
+    return db.get_stats(
+        start_date=start_date,
+        end_date=end_date,
+        severity=severity,
+        date_range=date_range,
+    )
 
 
 @app.get("/violations/trend", tags=["Violations"])
@@ -232,10 +250,16 @@ async def get_violation_trend(
     start_date: str = None,
     end_date: str = None,
     camera_id: str = None,
+    date_range: str = Query(None, description="today / weekly / monthly"),
     current_user=Depends(auth.require_all)
 ):
     """Data trend pelanggaran per tanggal untuk grafik."""
-    return db.get_trend(start_date=start_date, end_date=end_date, camera_id=camera_id)
+    return db.get_trend(
+        start_date=start_date,
+        end_date=end_date,
+        camera_id=camera_id,
+        date_range=date_range,
+    )
 
 
 @app.get("/violations/{violation_id}", tags=["Violations"])
@@ -358,6 +382,8 @@ async def export_csv(
     end_date: str = None,
     camera_id: str = None,
     status: str = None,
+    severity: str = None,
+    date_range: str = Query(None, description="today / weekly / monthly"),
     current_user=Depends(auth.require_hr)
 ):
     """
@@ -365,7 +391,8 @@ async def export_csv(
     Akses: HR/CAO, Manager, Admin.
     """
     data = db.get_all_for_export(start_date=start_date, end_date=end_date,
-                                  camera_id=camera_id, status=status)
+                                  camera_id=camera_id, status=status,
+                                  severity=severity, date_range=date_range)
     csv_bytes = export_module.export_csv(data)
     filename = f"laporan_apd_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
     return StreamingResponse(
@@ -381,6 +408,8 @@ async def export_pdf(
     end_date: str = None,
     camera_id: str = None,
     status: str = None,
+    severity: str = None,
+    date_range: str = Query(None, description="today / weekly / monthly"),
     current_user=Depends(auth.require_hr)
 ):
     """
@@ -388,7 +417,8 @@ async def export_pdf(
     Akses: HR/CAO, Manager, Admin.
     """
     data = db.get_all_for_export(start_date=start_date, end_date=end_date,
-                                  camera_id=camera_id, status=status)
+                                  camera_id=camera_id, status=status,
+                                  severity=severity, date_range=date_range)
     title = "Laporan Pelanggaran APD"
     if start_date or end_date:
         title += f" ({start_date or '...'} s/d {end_date or '...'})"
@@ -460,6 +490,61 @@ async def update_rule(rule_id: int, data: rule_module.RuleUpdate,
 async def delete_rule(rule_id: int, current_user=Depends(auth.require_admin)):
     rule_module.delete_rule(rule_id)
     return {"message": "Rule berhasil dihapus"}
+
+
+# ─── Stats Dashboard ───────────────────────────────────────────────────────────
+
+@app.get("/stats/trend", tags=["Stats"])
+async def stats_trend(
+    start_date: str = None,
+    end_date: str = None,
+    camera_id: str = None,
+    date_range: str = Query(None, description="today / weekly / monthly"),
+    current_user=Depends(auth.require_all)
+):
+    return stats_module.get_trend(
+        start_date=start_date,
+        end_date=end_date,
+        camera_id=camera_id,
+        date_range=date_range,
+    )
+
+
+@app.get("/stats/distribution", tags=["Stats"])
+async def stats_distribution(
+    start_date: str = None,
+    end_date: str = None,
+    camera_id: str = None,
+    date_range: str = Query(None, description="today / weekly / monthly"),
+    current_user=Depends(auth.require_all)
+):
+    return stats_module.get_distribution(
+        start_date=start_date,
+        end_date=end_date,
+        camera_id=camera_id,
+        date_range=date_range,
+    )
+
+
+@app.get("/stats/heatmap", tags=["Stats"])
+async def stats_heatmap(
+    start_date: str = None,
+    end_date: str = None,
+    camera_id: str = None,
+    date_range: str = Query(None, description="today / weekly / monthly"),
+    current_user=Depends(auth.require_all)
+):
+    return stats_module.get_heatmap(
+        start_date=start_date,
+        end_date=end_date,
+        camera_id=camera_id,
+        date_range=date_range,
+    )
+
+
+@app.get("/stats/kpi", tags=["Stats"])
+async def stats_kpi(current_user=Depends(auth.require_all)):
+    return stats_module.get_kpi()
 
 
 # ─── WebSocket ─────────────────────────────────────────────────────────────────
@@ -548,6 +633,7 @@ async def websocket_camera(websocket: WebSocket, camera_id: str):
                     "timestamp": result.timestamp,
                     "has_violation": result.has_violation,
                     "violations": result.violations,
+                    "severity": result.severity,
                     "detections": [d.dict() for d in result.detections],
                     "summary": result.summary,
                     "logged": logged,

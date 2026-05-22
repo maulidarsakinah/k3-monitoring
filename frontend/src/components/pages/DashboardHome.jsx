@@ -19,13 +19,13 @@ export default function DashboardHome({
         <div className="rounded-2xl border border-amber-100 bg-amber-50 p-5">
           <div className="flex items-center gap-2 mb-2">
             <BellRing size={18} className="text-amber-700" />
-            <h2 className="font-bold text-amber-950">Reminder Validasi</h2>
+            <h2 className="font-bold text-amber-950">Perlu Perhatian</h2>
           </div>
           <p className="text-2xl font-bold text-amber-950">
             {reminderItems.length}
           </p>
           <p className="text-xs text-amber-800 mt-1">
-            laporan melewati SLA atau perlu perhatian.
+            incident yang sebaiknya segera ditinjau.
           </p>
         </div>
       </div>
@@ -34,7 +34,7 @@ export default function DashboardHome({
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
           <div className="flex items-center gap-2 mb-3">
             <AlertTriangle size={18} className="text-amber-700" />
-            <h3 className="font-bold text-amber-950">Escalation Alert</h3>
+            <h3 className="font-bold text-amber-950">Incident Perlu Ditinjau</h3>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {reminderItems.slice(0, 4).map((item) => (
@@ -50,7 +50,7 @@ export default function DashboardHome({
                 </p>
                 <p className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-amber-800">
                   <Clock size={13} />
-                  {item.slaText}
+                  {item.attentionText}
                 </p>
               </div>
             ))}

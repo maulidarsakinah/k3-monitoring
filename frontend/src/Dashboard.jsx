@@ -41,7 +41,6 @@ import LiveMonitoringPage from "./components/pages/LiveMonitoringPage.jsx";
 import ManagementPage from "./components/pages/ManagementPage.jsx";
 import NotFoundPage from "./components/pages/NotFoundPage.jsx";
 import ReportsPage from "./components/pages/ReportsPage.jsx";
-import SettingsPage from "./components/pages/SettingsPage.jsx";
 import { formatDate } from "./utils/date.js";
 import {
   buildCameraBreakdown,
@@ -54,7 +53,7 @@ import {
 
 // Constants for pagination
 const ITEMS_PER_PAGE = 10; // Update limit to 10 items per page
-const DEFAULT_REMINDER_HOURS = 24;
+const ATTENTION_THRESHOLD_HOURS = 24;
 
 const getReadNotificationKey = (username) =>
   `read_notifications:${username || "anonymous"}`;
@@ -124,6 +123,7 @@ export default function Dashboard({ user, onLogout, onSessionExpired }) {
   const [cameraBreakdown, setCameraBreakdown] = useState([]);
   const [registeredCameras, setRegisteredCameras] = useState([]);
   const [selectedCamera, setSelectedCamera] = useState(""); // State baru untuk filter kamera
+  const [selectedSeverity, setSelectedSeverity] = useState("");
   const [hourlyBreakdown, setHourlyBreakdown] = useState([]);
   const [timeRange, setTimeRange] = useState("7d"); // Default to 7 days
   const [customStartDate, setCustomStartDate] = useState("");
@@ -139,9 +139,6 @@ export default function Dashboard({ user, onLogout, onSessionExpired }) {
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(
     () => localStorage.getItem("dark_mode") === "true",
-  );
-  const [reminderHours, setReminderHours] = useState(() =>
-    Number(localStorage.getItem("reminder_hours") || DEFAULT_REMINDER_HOURS),
   );
 
   useEffect(() => {
@@ -172,6 +169,7 @@ export default function Dashboard({ user, onLogout, onSessionExpired }) {
         if (startDateStr) apiParams.start_date = startDateStr;
         if (endDateStr) apiParams.end_date = endDateStr;
         if (selectedCamera) apiParams.camera_id = selectedCamera; // Kirim filter kamera ke API
+        if (selectedSeverity) apiParams.severity = selectedSeverity;
 
         const [v, s, h, q, c] = await Promise.all([
           getDashboardData(apiParams),
@@ -230,6 +228,7 @@ export default function Dashboard({ user, onLogout, onSessionExpired }) {
     customStartDate,
     customEndDate,
     selectedCamera,
+    selectedSeverity,
     refreshKey,
     onSessionExpired,
     user?.role,
@@ -345,22 +344,19 @@ export default function Dashboard({ user, onLogout, onSessionExpired }) {
       return {
         ...item,
         ageHours,
-        slaText:
-          ageHours >= reminderHours
-            ? `Lewat SLA ${Math.floor(ageHours)} jam`
-            : `Menunggu ${Math.floor(ageHours)} jam`,
+        attentionText:
+          ageHours >= ATTENTION_THRESHOLD_HOURS
+            ? `Perlu ditinjau (${Math.floor(ageHours)} jam)`
+            : `Menunggu tindak lanjut (${Math.floor(ageHours)} jam)`,
       };
     })
-    .filter((item) => item.ageHours >= reminderHours || item.reportSent);
+    .filter((item) => item.ageHours >= ATTENTION_THRESHOLD_HOURS || item.reportSent);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", darkMode);
     localStorage.setItem("dark_mode", String(darkMode));
   }, [darkMode]);
 
-  useEffect(() => {
-    localStorage.setItem("reminder_hours", String(reminderHours));
-  }, [reminderHours]);
   // Set today's date on first render
   useEffect(() => {
     setTodayStr(formatDate(new Date()));
@@ -398,7 +394,6 @@ export default function Dashboard({ user, onLogout, onSessionExpired }) {
     validation: "Validasi",
     reports: "Laporan",
     management: "Manajemen",
-    settings: "Pengaturan",
   };
 
   // ── Render the correct page content ──
@@ -495,14 +490,6 @@ export default function Dashboard({ user, onLogout, onSessionExpired }) {
           <NotFoundPage onBackHome={() => handleNavigate("dashboard")} />
         );
 
-      case "settings":
-        return (
-          <SettingsPage
-            reminderHours={reminderHours}
-            onReminderHoursChange={setReminderHours}
-          />
-        );
-
       default:
         return <NotFoundPage onBackHome={() => handleNavigate("dashboard")} />;
     }
@@ -532,6 +519,7 @@ export default function Dashboard({ user, onLogout, onSessionExpired }) {
           cameras={cameraOptions}
           exporting={exporting}
           selectedCamera={selectedCamera}
+          selectedSeverity={selectedSeverity}
           onClose={() => setExportDialogOpen(false)}
           onExport={async (format, params) => {
             setExporting(format);
@@ -592,10 +580,12 @@ export default function Dashboard({ user, onLogout, onSessionExpired }) {
           onRefresh={() => setRefreshKey((key) => key + 1)}
           searchQuery={searchQuery}
           selectedCamera={selectedCamera}
+          selectedSeverity={selectedSeverity}
           setCustomEndDate={setCustomEndDate}
           setCustomStartDate={setCustomStartDate}
           setSearchQuery={setSearchQuery}
           setSelectedCamera={setSelectedCamera}
+          setSelectedSeverity={setSelectedSeverity}
           setTimeRange={setTimeRange}
           timeRange={timeRange}
           unreadCount={unreadCount}

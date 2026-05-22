@@ -159,6 +159,23 @@ export const getStatistics = async (params = {}) => {
   };
 };
 
+export const getStatsTrend = async (params = {}) => {
+  const query = toQuery(params);
+  return request(`/stats/trend${query ? `?${query}` : ""}`);
+};
+
+export const getStatsDistribution = async (params = {}) => {
+  const query = toQuery(params);
+  return request(`/stats/distribution${query ? `?${query}` : ""}`);
+};
+
+export const getStatsHeatmap = async (params = {}) => {
+  const query = toQuery(params);
+  return request(`/stats/heatmap${query ? `?${query}` : ""}`);
+};
+
+export const getStatsKpi = () => request("/stats/kpi");
+
 export const getHistoryLog = async (params = {}) => {
   const data = await getViolations(params);
   return data.violations;
