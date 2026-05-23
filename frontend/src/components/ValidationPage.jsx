@@ -17,6 +17,7 @@ import {
   submitViolationReport,
   validateViolation,
 } from "../services/api.js";
+import ConfirmDialog from "./common/ConfirmDialog.jsx";
 import ViolationBadges from "./common/ViolationBadges.jsx";
 
 const statusStyle = {
@@ -65,7 +66,7 @@ function ValidationStats({ items, mode }) {
           key={item.label}
           className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3"
         >
-          <p className="text-xs font-semibold text-slate-400 uppercase">
+          <p className="text-xs font-semibold text-slate-500 uppercase">
             {item.label}
           </p>
           <p className="text-2xl font-bold text-slate-900 mt-1">
@@ -185,6 +186,7 @@ export default function ValidationPage({
   const [selectedId, setSelectedId] = useState(null);
   const [checkedIds, setCheckedIds] = useState([]);
   const [errorMessage, setErrorMessage] = useState("");
+  const [confirmState, setConfirmState] = useState(null);
   const allowedToValidate = canValidate(user?.role);
   const allowedToSubmitReport = canSubmitReport(user?.role);
   const mode = allowedToValidate ? "manager" : "staff";
@@ -227,168 +229,238 @@ export default function ValidationPage({
     );
   };
 
-  const handleAction = async (id, action) => {
+  const confirmAndRun = ({
+    title,
+    message,
+    confirmLabel,
+    tone = "primary",
+    noteEnabled = true,
+    initialNote = "",
+    noteLabel = "Catatan",
+    task,
+  }) => {
+    setConfirmState({
+      title,
+      message,
+      confirmLabel,
+      tone,
+      noteEnabled,
+      initialNote,
+      noteLabel,
+      task,
+    });
+  };
+
+  const handleConfirmAction = async (note) => {
+    if (!confirmState?.task) return;
+    await confirmState.task(note);
+    setConfirmState(null);
+  };
+
+  const handleAction = (id, action) => {
     const label = action === "approve" ? "setujui" : "tolak";
-    if (!window.confirm(`Yakin ingin ${label} laporan ini?`)) return;
-    const note =
-      window.prompt("Catatan validasi manager:", "Validated via Dashboard") ||
-      "Validated via Dashboard";
-    setLoadingId(id);
-    setErrorMessage("");
-    try {
-      const backendAction = action === "approve" ? "approved" : "rejected";
-      await validateViolation(id, backendAction, note);
+    confirmAndRun({
+      title: action === "approve" ? "Setujui Laporan" : "Tolak Laporan",
+      message: `Laporan ini akan di-${label} oleh Manager.`,
+      confirmLabel: action === "approve" ? "Setujui" : "Tolak",
+      tone: action === "approve" ? "primary" : "danger",
+      initialNote: action === "approve" ? "Disetujui Manager" : "Ditolak Manager",
+      task: async (note) => {
+        const finalNote = note || (action === "approve" ? "Disetujui Manager" : "Ditolak Manager");
+        setLoadingId(id);
+        setErrorMessage("");
+        try {
+          const backendAction = action === "approve" ? "approved" : "rejected";
+          await validateViolation(id, backendAction, finalNote);
 
-      setQueue((prev) =>
-        prev.map((item) =>
-          item.id === id
-            ? {
-                ...item,
-                status: action === "approve" ? "Validated" : "Dismissed",
-              }
-            : item,
-        ),
-      );
-      onValidated?.();
-    } catch (err) {
-      setErrorMessage(err.message || "Gagal memproses validasi.");
-    } finally {
-      setLoadingId(null);
-    }
+          setQueue((prev) =>
+            prev.map((item) =>
+              item.id === id
+                ? {
+                    ...item,
+                    status: action === "approve" ? "Validated" : "Dismissed",
+                  }
+                : item,
+            ),
+          );
+          onValidated?.();
+        } catch (err) {
+          setErrorMessage(err.message || "Gagal memproses validasi.");
+        } finally {
+          setLoadingId(null);
+        }
+      },
+    });
   };
 
-  const handleSubmitReport = async (id) => {
-    if (!window.confirm("Kirim laporan ini ke Manager untuk divalidasi?")) return;
-    const note =
-      window.prompt(
-        "Catatan staff:",
-        "Dikirim Staff Operasional untuk proses validasi manager",
-      ) || "Dikirim Staff Operasional untuk proses validasi manager";
-    setLoadingId(id);
-    setErrorMessage("");
-    try {
-      const response = await submitViolationReport(id, note);
+  const handleSubmitReport = (id) => {
+    confirmAndRun({
+      title: "Kirim ke Manager",
+      message: "Incident ini akan masuk antrean Manager untuk validasi formal.",
+      confirmLabel: "Kirim Manager",
+      tone: "primary",
+      initialNote: "Dikirim Staff Operasional untuk proses validasi manager",
+      task: async (note) => {
+        const finalNote = note || "Dikirim Staff Operasional untuk proses validasi manager";
+        setLoadingId(id);
+        setErrorMessage("");
+        try {
+          const response = await submitViolationReport(id, finalNote);
 
-      setQueue((prev) =>
-        prev.map((item) =>
-          item.id === id
-            ? {
-                ...item,
-                rawStatus: "needs_manager",
-                status: "Needs Manager",
-                reportSent: true,
-                reportSentBy: response.violation?.report_sent_by || user?.username,
-                reportSentAt: "Baru saja",
-                reportNote: response.violation?.report_note,
-              }
-            : item,
-        ),
-      );
-      onValidated?.();
-    } catch (err) {
-      setErrorMessage(err.message || "Gagal mengirim laporan ke manager.");
-    } finally {
-      setLoadingId(null);
-    }
+          setQueue((prev) =>
+            prev.map((item) =>
+              item.id === id
+                ? {
+                    ...item,
+                    rawStatus: "needs_manager",
+                    status: "Needs Manager",
+                    reportSent: true,
+                    reportSentBy: response.violation?.report_sent_by || user?.username,
+                    reportSentAt: "Baru saja",
+                    reportNote: response.violation?.report_note,
+                  }
+                : item,
+            ),
+          );
+          onValidated?.();
+        } catch (err) {
+          setErrorMessage(err.message || "Gagal mengirim laporan ke manager.");
+        } finally {
+          setLoadingId(null);
+        }
+      },
+    });
   };
 
-  const handleStaffReview = async (id) => {
-    if (!window.confirm("Tandai incident ini selesai di level staff?")) return;
-    const note =
-      window.prompt(
-        "Catatan review staff:",
-        "Incident valid dan cukup ditangani di level staff",
-      ) || "Incident valid dan cukup ditangani di level staff";
-    setLoadingId(id);
-    setErrorMessage("");
-    try {
-      await staffReviewViolation(id, note);
-      setQueue((prev) =>
-        prev.map((item) =>
-          item.id === id
-            ? {
-                ...item,
-                rawStatus: "staff_reviewed",
-                status: "Staff Reviewed",
-                staffReviewedBy: user?.username,
-                staffReviewedAt: "Baru saja",
-                staffNote: note,
-              }
-            : item,
-        ),
-      );
-      onValidated?.();
-    } catch (err) {
-      setErrorMessage(err.message || "Gagal menyimpan review staff.");
-    } finally {
-      setLoadingId(null);
-    }
+  const handleStaffReview = (id) => {
+    confirmAndRun({
+      title: "Review Internal",
+      message: "Incident ini akan ditandai selesai di level Staff dan tidak dikirim ke Manager.",
+      confirmLabel: "Selesaikan",
+      tone: "primary",
+      initialNote: "Incident valid dan cukup ditangani di level staff",
+      task: async (note) => {
+        const finalNote = note || "Incident valid dan cukup ditangani di level staff";
+        setLoadingId(id);
+        setErrorMessage("");
+        try {
+          await staffReviewViolation(id, finalNote);
+          setQueue((prev) =>
+            prev.map((item) =>
+              item.id === id
+                ? {
+                    ...item,
+                    rawStatus: "staff_reviewed",
+                    status: "Staff Reviewed",
+                    staffReviewedBy: user?.username,
+                    staffReviewedAt: "Baru saja",
+                    staffNote: finalNote,
+                  }
+                : item,
+            ),
+          );
+          onValidated?.();
+        } catch (err) {
+          setErrorMessage(err.message || "Gagal menyimpan review staff.");
+        } finally {
+          setLoadingId(null);
+        }
+      },
+    });
   };
 
-  const handleBulkSubmit = async () => {
+  const handleBulkSubmit = () => {
     if (checkedActionableIds.length === 0) return;
-    if (!window.confirm(`Kirim ${checkedActionableIds.length} laporan ke Manager?`)) return;
-    const note =
-      window.prompt(
-        "Catatan staff untuk semua laporan:",
-        "Dikirim Staff Operasional untuk proses validasi manager",
-      ) || "Dikirim Staff Operasional untuk proses validasi manager";
-    setLoadingId("bulk");
-    setErrorMessage("");
-    try {
-      await Promise.all(checkedActionableIds.map((id) => submitViolationReport(id, note)));
-      setCheckedIds([]);
-      onValidated?.();
-    } catch (err) {
-      setErrorMessage(err.message || "Gagal mengirim laporan terpilih.");
-    } finally {
-      setLoadingId(null);
-    }
+    confirmAndRun({
+      title: "Kirim Banyak Laporan",
+      message: `${checkedActionableIds.length} laporan akan dikirim ke Manager.`,
+      confirmLabel: "Kirim Semua",
+      tone: "primary",
+      initialNote: "Dikirim Staff Operasional untuk proses validasi manager",
+      task: async (note) => {
+        const finalNote = note || "Dikirim Staff Operasional untuk proses validasi manager";
+        setLoadingId("bulk");
+        setErrorMessage("");
+        try {
+          await Promise.all(checkedActionableIds.map((id) => submitViolationReport(id, finalNote)));
+          setCheckedIds([]);
+          onValidated?.();
+        } catch (err) {
+          setErrorMessage(err.message || "Gagal mengirim laporan terpilih.");
+        } finally {
+          setLoadingId(null);
+        }
+      },
+    });
   };
 
-  const handleBulkStaffReview = async () => {
+  const handleBulkStaffReview = () => {
     if (checkedActionableIds.length === 0) return;
-    if (!window.confirm(`Tandai ${checkedActionableIds.length} incident selesai di level staff?`)) return;
-    const note =
-      window.prompt(
-        "Catatan review untuk semua incident:",
-        "Incident valid dan cukup ditangani di level staff",
-      ) || "Incident valid dan cukup ditangani di level staff";
-    setLoadingId("bulk");
-    setErrorMessage("");
-    try {
-      await Promise.all(checkedActionableIds.map((id) => staffReviewViolation(id, note)));
-      setCheckedIds([]);
-      onValidated?.();
-    } catch (err) {
-      setErrorMessage(err.message || "Gagal mereview incident terpilih.");
-    } finally {
-      setLoadingId(null);
-    }
+    confirmAndRun({
+      title: "Review Internal Massal",
+      message: `${checkedActionableIds.length} incident akan ditandai selesai di level Staff.`,
+      confirmLabel: "Selesaikan",
+      tone: "primary",
+      initialNote: "Incident valid dan cukup ditangani di level staff",
+      task: async (note) => {
+        const finalNote = note || "Incident valid dan cukup ditangani di level staff";
+        setLoadingId("bulk");
+        setErrorMessage("");
+        try {
+          await Promise.all(checkedActionableIds.map((id) => staffReviewViolation(id, finalNote)));
+          setCheckedIds([]);
+          onValidated?.();
+        } catch (err) {
+          setErrorMessage(err.message || "Gagal mereview incident terpilih.");
+        } finally {
+          setLoadingId(null);
+        }
+      },
+    });
   };
 
-  const handleBulkValidate = async (action) => {
+  const handleBulkValidate = (action) => {
     if (checkedActionableIds.length === 0) return;
     const label = action === "approved" ? "setujui" : "tolak";
-    if (!window.confirm(`Yakin ingin ${label} ${checkedActionableIds.length} laporan?`)) return;
-    const note =
-      window.prompt("Catatan validasi untuk semua laporan:", "Bulk validation via Dashboard") ||
-      "Bulk validation via Dashboard";
-    setLoadingId("bulk");
-    setErrorMessage("");
-    try {
-      await Promise.all(checkedActionableIds.map((id) => validateViolation(id, action, note)));
-      setCheckedIds([]);
-      onValidated?.();
-    } catch (err) {
-      setErrorMessage(err.message || "Gagal memvalidasi laporan terpilih.");
-    } finally {
-      setLoadingId(null);
-    }
+    confirmAndRun({
+      title: action === "approved" ? "Setujui Massal" : "Tolak Massal",
+      message: `${checkedActionableIds.length} laporan akan di-${label}.`,
+      confirmLabel: action === "approved" ? "Setujui Semua" : "Tolak Semua",
+      tone: action === "approved" ? "primary" : "danger",
+      initialNote: action === "approved" ? "Disetujui Manager" : "Ditolak Manager",
+      task: async (note) => {
+        const finalNote = note || (action === "approved" ? "Disetujui Manager" : "Ditolak Manager");
+        setLoadingId("bulk");
+        setErrorMessage("");
+        try {
+          await Promise.all(checkedActionableIds.map((id) => validateViolation(id, action, finalNote)));
+          setCheckedIds([]);
+          onValidated?.();
+        } catch (err) {
+          setErrorMessage(err.message || "Gagal memvalidasi laporan terpilih.");
+        } finally {
+          setLoadingId(null);
+        }
+      },
+    });
   };
 
   return (
     <div className="space-y-5">
+      <ConfirmDialog
+        open={Boolean(confirmState)}
+        title={confirmState?.title}
+        message={confirmState?.message}
+        confirmLabel={confirmState?.confirmLabel}
+        tone={confirmState?.tone}
+        loading={Boolean(loadingId)}
+        noteEnabled={confirmState?.noteEnabled}
+        initialNote={confirmState?.initialNote}
+        noteLabel={confirmState?.noteLabel}
+        onCancel={() => setConfirmState(null)}
+        onConfirm={handleConfirmAction}
+      />
+
       <div className="bg-white rounded-2xl border border-gray-100 p-6">
         <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-5">
           <div>
@@ -397,7 +469,7 @@ export default function ValidationPage({
                 ? "Validasi Laporan Staff"
                 : "Review Incident Staff"}
             </h2>
-            <p className="text-sm text-gray-400 mt-1">
+            <p className="text-sm text-gray-500 mt-1">
               {allowedToValidate
                 ? "Manager hanya menerima incident tertentu yang dikirim Staff Operasional."
                 : "Review incident. Kirim ke Manager hanya jika perlu keputusan formal."}
@@ -434,7 +506,7 @@ export default function ValidationPage({
               ? "Belum ada laporan dari staff"
               : "Tidak ada incident baru untuk direview"}
           </h3>
-          <p className="text-sm text-gray-400 mt-1">
+          <p className="text-sm text-gray-500 mt-1">
             {allowedToValidate
               ? "Laporan akan muncul setelah Staff Operasional mengirimkannya."
               : "Incident baru akan muncul setelah sistem mendeteksi pelanggaran."}
@@ -458,7 +530,7 @@ export default function ValidationPage({
                 </button>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-xs text-gray-400">
+                <span className="text-xs text-gray-500">
                   {checkedActionableIds.length}/{queue.length} dipilih
                 </span>
                 {allowedToSubmitReport && (
@@ -521,7 +593,7 @@ export default function ValidationPage({
                   <h3 className="font-bold text-gray-900">
                     Detail Validasi
                   </h3>
-                  <p className="text-xs text-gray-400 mt-1">
+                  <p className="text-xs text-gray-500 mt-1">
                     ID #{selected.id}
                   </p>
                   {selected.occurrenceCount > 1 && (
@@ -542,7 +614,7 @@ export default function ValidationPage({
 
               <div className="mt-5 space-y-4">
                 <div>
-                  <p className="text-xs font-semibold uppercase text-gray-400 mb-2">
+                  <p className="text-xs font-semibold uppercase text-gray-500 mb-2">
                     Jenis Pelanggaran
                   </p>
                   <ViolationTags value={selected.detectedViolation} />
@@ -550,13 +622,13 @@ export default function ValidationPage({
 
                 <div className="grid grid-cols-2 gap-3">
                   <div className="rounded-lg bg-slate-50 px-3 py-2">
-                    <p className="text-xs text-gray-400">Kamera</p>
+                    <p className="text-xs text-gray-500">Kamera</p>
                     <p className="text-sm font-mono font-semibold text-gray-800">
                       {selected.camera}
                     </p>
                   </div>
                   <div className="rounded-lg bg-slate-50 px-3 py-2">
-                    <p className="text-xs text-gray-400">Terakhir Terdeteksi</p>
+                    <p className="text-xs text-gray-500">Terakhir Terdeteksi</p>
                     <p className="text-sm font-semibold text-gray-800">
                       {selected.lastDetectedAt || selected.time}
                     </p>
@@ -565,13 +637,13 @@ export default function ValidationPage({
 
                 <div className="grid grid-cols-2 gap-3">
                   <div className="rounded-lg bg-slate-50 px-3 py-2">
-                    <p className="text-xs text-gray-400">Pertama Terdeteksi</p>
+                    <p className="text-xs text-gray-500">Pertama Terdeteksi</p>
                     <p className="text-sm font-semibold text-gray-800">
                       {selected.firstDetectedAt || selected.time}
                     </p>
                   </div>
                   <div className="rounded-lg bg-slate-50 px-3 py-2">
-                    <p className="text-xs text-gray-400">Jumlah Kejadian</p>
+                    <p className="text-xs text-gray-500">Jumlah Kejadian</p>
                     <p className="text-sm font-semibold text-gray-800">
                       {selected.occurrenceCount || 1} kali
                     </p>
@@ -580,7 +652,7 @@ export default function ValidationPage({
 
                 {selected.summary && (
                   <div className="rounded-lg bg-slate-50 px-3 py-2">
-                    <p className="text-xs text-gray-400 mb-1">Ringkasan</p>
+                    <p className="text-xs text-gray-500 mb-1">Ringkasan</p>
                     <p className="text-sm text-gray-700 leading-relaxed">
                       {selected.summary}
                     </p>

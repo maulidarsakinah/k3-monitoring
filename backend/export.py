@@ -16,7 +16,7 @@ def export_csv(data: list[dict]) -> bytes:
         "report_note", "validated_by", "validated_at", "validation_note",
         "staff_reviewed_by", "staff_reviewed_at", "staff_note",
         "first_detected_at", "last_detected_at", "occurrence_count",
-        "confidence_max", "evidence_path"
+        "confidence_max", "auto_review", "evidence_path"
     ]
     writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore")
     writer.writeheader()
@@ -24,6 +24,7 @@ def export_csv(data: list[dict]) -> bytes:
         row_copy = row.copy()
         # violations adalah list, join jadi string
         row_copy["violations"] = "; ".join(row_copy.get("violations", []))
+        row_copy["auto_review"] = "yes" if row_copy.get("staff_reviewed_by") == "system" else "no"
         writer.writerow(row_copy)
     return output.getvalue().encode("utf-8-sig")  # utf-8-sig agar Excel bisa baca
 
@@ -107,6 +108,8 @@ def export_pdf(data: list[dict], title: str = "Laporan Pelanggaran APD") -> byte
         timestamp = row.get("timestamp", "")[:19].replace("T", " ")
         validated_at = (row.get("validated_at") or "")[:16].replace("T", " ")
         validated_by = row.get("validated_by") or "-"
+        if row.get("staff_reviewed_by") == "system":
+            validated_by = "Auto-reviewed by system"
         if validated_at:
             validated_by = f"{validated_by}\n{validated_at}"
         report_at = (row.get("report_sent_at") or "")[:16].replace("T", " ")
@@ -118,6 +121,8 @@ def export_pdf(data: list[dict], title: str = "Laporan Pelanggaran APD") -> byte
             f"Severity: {(row.get('severity') or 'none').upper()}\n"
             f"Conf max: {round((row.get('confidence_max') or 0) * 100)}%"
         )
+        if row.get("staff_reviewed_by") == "system":
+            incident_info += "\nAuto Review"
 
         table_data.append([
             str(i),

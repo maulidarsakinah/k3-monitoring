@@ -174,10 +174,16 @@ export const getStatsHeatmap = async (params = {}) => {
   return request(`/stats/heatmap${query ? `?${query}` : ""}`);
 };
 
+export const getStatsCameras = async (params = {}) => {
+  const query = toQuery(params);
+  return request(`/stats/cameras${query ? `?${query}` : ""}`);
+};
+
 export const getStatsKpi = () => request("/stats/kpi");
 
 export const getHistoryLog = async (params = {}) => {
   const data = await getViolations(params);
+  if (params.page) return data;
   return data.violations;
 };
 
@@ -223,12 +229,26 @@ export const updateUserRole = (id, role) =>
     body: JSON.stringify({ role }),
   });
 
+export const updateUser = (id, payload) =>
+  request(`/users/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
 export const deleteUser = (id) =>
   request(`/users/${id}`, {
     method: "DELETE",
   });
 
 export const getCameras = () => request("/cameras");
+
+export const getCameraStreamStatus = () => request("/cameras/streams/status");
+
+export const restartCameraStream = (id) =>
+  request(`/cameras/${id}/restart-stream`, {
+    method: "POST",
+  });
 
 export const createCamera = (payload) =>
   request("/cameras", {

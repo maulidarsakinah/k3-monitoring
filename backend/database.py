@@ -7,6 +7,7 @@ from models import DetectionResult
 logger = logging.getLogger(__name__)
 DB_PATH = "violations.db"
 INCIDENT_WINDOW_MINUTES = 5
+AUTO_REVIEW_CONFIDENCE_THRESHOLD = 0.9
 
 
 def _normalize_end_date(end_date: str = None) -> str:
@@ -88,6 +89,7 @@ class ViolationDatabase:
         try:
             incident_key = self._incident_key(result.camera_id, result.violations)
             confidence = self._max_confidence(result)
+            auto_review = confidence >= AUTO_REVIEW_CONFIDENCE_THRESHOLD
             timestamp = result.timestamp or datetime.now().isoformat()
             try:
                 parsed_timestamp = datetime.fromisoformat(timestamp)
@@ -112,42 +114,69 @@ class ViolationDatabase:
                     old_avg = existing["confidence_avg"] or 0
                     next_avg = ((old_avg * (count - 1)) + confidence) / count
                     next_max = max(existing["confidence_max"] or 0, confidence)
-                    conn.execute(
-                        """UPDATE violations
-                           SET last_detected_at=?, occurrence_count=?, confidence_avg=?,
-                               confidence_max=?, summary=?, severity=?, evidence_path=COALESCE(?, evidence_path)
-                           WHERE id=?""",
-                        (
-                            timestamp,
-                            count,
-                            next_avg,
-                            next_max,
-                            result.summary,
-                            result.severity,
-                            evidence_path,
-                            existing["id"],
-                        ),
-                    )
+                    if auto_review or next_max >= AUTO_REVIEW_CONFIDENCE_THRESHOLD:
+                        conn.execute(
+                            """UPDATE violations
+                               SET last_detected_at=?, occurrence_count=?, confidence_avg=?,
+                                   confidence_max=?, summary=?, severity=?, evidence_path=COALESCE(?, evidence_path),
+                                   status='staff_reviewed', staff_reviewed_by='system',
+                                   staff_reviewed_at=?, staff_note=?
+                               WHERE id=?""",
+                            (
+                                timestamp,
+                                count,
+                                next_avg,
+                                next_max,
+                                result.summary,
+                                result.severity,
+                                evidence_path,
+                                datetime.now().isoformat(),
+                                f"Auto review: confidence {round(next_max * 100)}%",
+                                existing["id"],
+                            ),
+                        )
+                    else:
+                        conn.execute(
+                            """UPDATE violations
+                               SET last_detected_at=?, occurrence_count=?, confidence_avg=?,
+                                   confidence_max=?, summary=?, severity=?, evidence_path=COALESCE(?, evidence_path)
+                               WHERE id=?""",
+                            (
+                                timestamp,
+                                count,
+                                next_avg,
+                                next_max,
+                                result.summary,
+                                result.severity,
+                                evidence_path,
+                                existing["id"],
+                            ),
+                        )
                 else:
                     conn.execute(
                         """INSERT INTO violations (
                                camera_id, timestamp, violations, summary, severity, status, evidence_path,
                                first_detected_at, last_detected_at, occurrence_count,
-                               confidence_avg, confidence_max, incident_key
+                               confidence_avg, confidence_max, incident_key,
+                               staff_reviewed_by, staff_reviewed_at, staff_note
                            )
-                           VALUES (?, ?, ?, ?, ?, 'detected', ?, ?, ?, 1, ?, ?, ?)""",
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)""",
                         (
                             result.camera_id,
                             timestamp,
                             json.dumps(result.violations),
                             result.summary,
                             result.severity,
+                            "staff_reviewed" if auto_review else "detected",
                             evidence_path,
                             timestamp,
                             timestamp,
                             confidence,
                             confidence,
                             incident_key,
+                            "system" if auto_review else None,
+                            datetime.now().isoformat() if auto_review else None,
+                            f"Auto review: confidence {round(confidence * 100)}%" if auto_review else None,
                         ),
                     )
                 conn.commit()

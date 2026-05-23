@@ -9,11 +9,13 @@ import base64
 import json
 import io
 import logging
+import os
 import re
 from datetime import datetime
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import cv2
 from detector import APDDetector
 from models import DetectionResult, ViolationLog, SystemStatus
 from database import ViolationDatabase
@@ -28,8 +30,12 @@ logger = logging.getLogger(__name__)
 detector: APDDetector = None
 db: ViolationDatabase = None
 LOG_COOLDOWN_SECONDS = 10
+RTSP_FRAME_INTERVAL_SECONDS = 2.0
+RTSP_RECONNECT_SECONDS = 5.0
 last_violation_log: dict[str, float] = {}
 EVIDENCE_DIR = Path("evidence")
+rtsp_tasks: dict[int, asyncio.Task] = {}
+rtsp_status: dict[int, dict] = {}
 
 
 @asynccontextmanager
@@ -41,8 +47,10 @@ async def lifespan(app: FastAPI):
     auth.init_user_table()
     cam_module.init_camera_table()
     rule_module.init_rules_table()
+    await refresh_rtsp_streams()
     logger.info("✅ Startup selesai!")
     yield
+    await stop_rtsp_streams()
     logger.info("Shutting down...")
 
 
@@ -142,6 +150,16 @@ async def update_role(user_id: int, payload: dict, current_user=Depends(auth.req
     if not new_role:
         raise HTTPException(status_code=400, detail="Field 'role' wajib diisi")
     return auth.update_user_role(user_id, new_role)
+
+
+@app.put("/users/{user_id}", tags=["Users"])
+async def update_user(user_id: int, payload: dict, current_user=Depends(auth.require_admin)):
+    return auth.update_user(
+        user_id,
+        username=payload.get("username"),
+        role=payload.get("role"),
+        password=payload.get("password"),
+    )
 
 
 @app.delete("/users/{user_id}", tags=["Users"])
@@ -448,19 +466,68 @@ async def get_cameras(current_user=Depends(auth.require_all)):
 
 @app.post("/cameras", tags=["Cameras"])
 async def create_camera(data: cam_module.CameraCreate, current_user=Depends(auth.require_manager)):
-    return cam_module.create_camera(data)
+    camera = cam_module.create_camera(data)
+    await refresh_rtsp_streams()
+    return camera
 
 
 @app.put("/cameras/{camera_id}", tags=["Cameras"])
 async def update_camera(camera_id: int, data: cam_module.CameraUpdate,
                         current_user=Depends(auth.require_manager)):
-    return cam_module.update_camera(camera_id, data)
+    camera = cam_module.update_camera(camera_id, data)
+    await refresh_rtsp_streams()
+    return camera
 
 
 @app.delete("/cameras/{camera_id}", tags=["Cameras"])
 async def delete_camera(camera_id: int, current_user=Depends(auth.require_admin)):
     cam_module.delete_camera(camera_id)
+    await refresh_rtsp_streams()
     return {"message": "Kamera berhasil dihapus"}
+
+
+@app.get("/cameras/streams/status", tags=["Cameras"])
+async def get_camera_stream_status(current_user=Depends(auth.require_all)):
+    cameras = cam_module.get_all_cameras()
+    statuses = []
+    for camera in cameras:
+        stream_status = rtsp_status.get(camera["id"], {})
+        statuses.append({
+            "id": camera["id"],
+            "name": camera["name"],
+            "has_rtsp": bool(camera.get("rtsp_url")),
+            "is_active": bool(camera.get("is_active")),
+            "stream_state": stream_status.get("state", "idle"),
+            "stream_message": stream_status.get("message", "Belum ada stream RTSP aktif"),
+            "updated_at": stream_status.get("updated_at"),
+            "last_frame_at": stream_status.get("last_frame_at"),
+            "last_detection_at": stream_status.get("last_detection_at"),
+            "last_violation_at": stream_status.get("last_violation_at"),
+        })
+    return statuses
+
+
+@app.post("/cameras/{camera_id}/restart-stream", tags=["Cameras"])
+async def restart_camera_stream(camera_id: int, current_user=Depends(auth.require_manager)):
+    camera = cam_module.get_camera_by_id(camera_id)
+    if not camera.get("rtsp_url"):
+        raise HTTPException(status_code=400, detail="Kamera belum memiliki RTSP URL")
+    if not camera.get("is_active"):
+        raise HTTPException(status_code=400, detail="Kamera sedang nonaktif")
+
+    task = rtsp_tasks.pop(camera_id, None)
+    if task:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    rtsp_tasks[camera_id] = asyncio.create_task(rtsp_camera_loop(camera))
+    rtsp_status[camera_id] = {
+        "camera_id": camera["name"],
+        "state": "connecting",
+        "message": "Stream direstart",
+        "updated_at": datetime.now().isoformat(),
+    }
+    return {"message": "Stream kamera direstart", "camera": camera}
 
 
 # ─── Rules ─────────────────────────────────────────────────────────────────────
@@ -542,6 +609,22 @@ async def stats_heatmap(
     )
 
 
+@app.get("/stats/cameras", tags=["Stats"])
+async def stats_cameras(
+    start_date: str = None,
+    end_date: str = None,
+    camera_id: str = None,
+    date_range: str = Query(None, description="today / weekly / monthly"),
+    current_user=Depends(auth.require_all)
+):
+    return stats_module.get_camera_breakdown(
+        start_date=start_date,
+        end_date=end_date,
+        camera_id=camera_id,
+        date_range=date_range,
+    )
+
+
 @app.get("/stats/kpi", tags=["Stats"])
 async def stats_kpi(current_user=Depends(auth.require_all)):
     return stats_module.get_kpi()
@@ -593,6 +676,159 @@ def should_log_violation(camera_id: str, violations: list[str]) -> bool:
         return False
     last_violation_log[key] = now
     return True
+
+
+async def process_frame_bytes(image_bytes: bytes, camera_id: str) -> dict | None:
+    if not detector:
+        return None
+
+    result = await asyncio.to_thread(detector.detect_from_bytes, image_bytes, camera_id)
+    image_b64 = base64.b64encode(image_bytes).decode()
+    logged = False
+
+    if result.has_violation:
+        logged = should_log_violation(camera_id, result.violations)
+        if logged:
+            evidence_path = save_evidence_image(image_bytes, camera_id, result.timestamp)
+            db.log_violation(result, evidence_path)
+
+    return {
+        "type": "detection",
+        "camera_id": camera_id,
+        "timestamp": result.timestamp,
+        "has_violation": result.has_violation,
+        "violations": result.violations,
+        "severity": result.severity,
+        "detections": [d.dict() for d in result.detections],
+        "summary": result.summary,
+        "logged": logged,
+        "log_cooldown_seconds": LOG_COOLDOWN_SECONDS,
+        "image": image_b64,
+    }
+
+
+async def rtsp_camera_loop(camera: dict):
+    camera_db_id = camera["id"]
+    camera_id = camera["name"]
+    rtsp_url = camera.get("rtsp_url")
+    os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp")
+
+    while True:
+        cap = None
+        try:
+            rtsp_status[camera_db_id] = {
+                "camera_id": camera_id,
+                "state": "connecting",
+                "message": "Menghubungkan ke RTSP",
+                "updated_at": datetime.now().isoformat(),
+                "last_frame_at": None,
+                "last_detection_at": None,
+                "last_violation_at": None,
+            }
+            cap = await asyncio.to_thread(cv2.VideoCapture, rtsp_url, cv2.CAP_FFMPEG)
+
+            if not cap or not cap.isOpened():
+                raise RuntimeError("RTSP tidak bisa dibuka")
+
+            rtsp_status[camera_db_id] = {
+                "camera_id": camera_id,
+                "state": "running",
+                "message": "Stream aktif",
+                "updated_at": datetime.now().isoformat(),
+                "last_frame_at": None,
+                "last_detection_at": None,
+                "last_violation_at": None,
+            }
+
+            while True:
+                ret, frame = await asyncio.to_thread(cap.read)
+                if not ret or frame is None:
+                    raise RuntimeError("Frame RTSP gagal dibaca")
+
+                ok, buffer = await asyncio.to_thread(cv2.imencode, ".jpg", frame)
+                if not ok:
+                    await asyncio.sleep(RTSP_FRAME_INTERVAL_SECONDS)
+                    continue
+
+                now_iso = datetime.now().isoformat()
+                current_status = rtsp_status.get(camera_db_id, {})
+                rtsp_status[camera_db_id] = {
+                    **current_status,
+                    "state": "running",
+                    "message": "Frame diterima",
+                    "updated_at": now_iso,
+                    "last_frame_at": now_iso,
+                }
+
+                payload = await process_frame_bytes(buffer.tobytes(), camera_id)
+                if payload:
+                    now_iso = datetime.now().isoformat()
+                    current_status = rtsp_status.get(camera_db_id, {})
+                    rtsp_status[camera_db_id] = {
+                        **current_status,
+                        "message": "Deteksi berjalan",
+                        "updated_at": now_iso,
+                        "last_detection_at": now_iso,
+                        "last_violation_at": now_iso if payload.get("has_violation") else current_status.get("last_violation_at"),
+                    }
+                    await manager.broadcast_to_viewers(camera_id, payload)
+
+                await asyncio.sleep(RTSP_FRAME_INTERVAL_SECONDS)
+
+        except asyncio.CancelledError:
+            rtsp_status[camera_db_id] = {
+                "camera_id": camera_id,
+                "state": "stopped",
+                "message": "Stream dihentikan",
+                "updated_at": datetime.now().isoformat(),
+                "last_frame_at": rtsp_status.get(camera_db_id, {}).get("last_frame_at"),
+                "last_detection_at": rtsp_status.get(camera_db_id, {}).get("last_detection_at"),
+                "last_violation_at": rtsp_status.get(camera_db_id, {}).get("last_violation_at"),
+            }
+            raise
+        except Exception as exc:
+            logger.warning(f"RTSP stream error [{camera_id}]: {exc}")
+            rtsp_status[camera_db_id] = {
+                "camera_id": camera_id,
+                "state": "error",
+                "message": str(exc),
+                "updated_at": datetime.now().isoformat(),
+                "last_frame_at": rtsp_status.get(camera_db_id, {}).get("last_frame_at"),
+                "last_detection_at": rtsp_status.get(camera_db_id, {}).get("last_detection_at"),
+                "last_violation_at": rtsp_status.get(camera_db_id, {}).get("last_violation_at"),
+            }
+            await asyncio.sleep(RTSP_RECONNECT_SECONDS)
+        finally:
+            if cap:
+                await asyncio.to_thread(cap.release)
+
+
+async def stop_rtsp_streams():
+    tasks = list(rtsp_tasks.values())
+    rtsp_tasks.clear()
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def refresh_rtsp_streams():
+    cameras = cam_module.get_all_cameras()
+    active_rtsp = {
+        camera["id"]: camera
+        for camera in cameras
+        if camera.get("is_active") and camera.get("rtsp_url")
+    }
+
+    existing_tasks = list(rtsp_tasks.values())
+    rtsp_tasks.clear()
+    for task in existing_tasks:
+        task.cancel()
+    if existing_tasks:
+        await asyncio.gather(*existing_tasks, return_exceptions=True)
+
+    for camera_id, camera in active_rtsp.items():
+        rtsp_tasks[camera_id] = asyncio.create_task(rtsp_camera_loop(camera))
 
 
 @app.websocket("/ws/camera/{camera_id}")

@@ -176,6 +176,38 @@ def update_user_role(user_id: int, new_role: str) -> dict:
     return dict(row)
 
 
+def update_user(user_id: int, username: str = None, role: str = None, password: str = None) -> dict:
+    fields = {}
+    if username:
+        fields["username"] = username
+    if role:
+        if role not in VALID_ROLES:
+            raise HTTPException(status_code=400, detail=f"Role tidak valid. Pilih: {list(VALID_ROLES)}")
+        fields["role"] = role
+    if password:
+        fields["password"] = hash_password(password)
+
+    if not fields:
+        raise HTTPException(status_code=400, detail="Tidak ada field yang diupdate")
+
+    set_clause = ", ".join(f"{key} = ?" for key in fields)
+    values = list(fields.values()) + [user_id]
+    try:
+        with _get_conn() as conn:
+            affected = conn.execute(f"UPDATE users SET {set_clause} WHERE id = ?", values).rowcount
+            conn.commit()
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=400, detail=f"Username '{username}' sudah digunakan")
+
+    if affected == 0:
+        raise HTTPException(status_code=404, detail="User tidak ditemukan")
+
+    with _get_conn() as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT id, username, role, created_at FROM users WHERE id = ?", (user_id,)).fetchone()
+    return dict(row)
+
+
 def delete_user(user_id: int):
     with _get_conn() as conn:
         admin_count = conn.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'").fetchone()[0]

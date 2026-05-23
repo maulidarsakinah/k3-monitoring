@@ -14,6 +14,7 @@ const statusStyle = {
 
 export default function LiveMonitoringPage({
   cameraBreakdown = [],
+  cameraStreamStatuses = [],
   latestViolations = [],
   loading,
   onRefresh,
@@ -26,6 +27,15 @@ export default function LiveMonitoringPage({
     const cameras = cameraBreakdown.map((item) => item.camera);
     return Array.from(new Set(["cam_test", ...cameras]));
   }, [cameraBreakdown]);
+  const streamStatusByName = useMemo(
+    () =>
+      cameraStreamStatuses.reduce((acc, item) => {
+        acc[item.name] = item;
+        return acc;
+      }, {}),
+    [cameraStreamStatuses],
+  );
+  const selectedStreamStatus = streamStatusByName[selectedCamera];
 
   useEffect(() => {
     setConnectionState("connecting");
@@ -82,8 +92,13 @@ export default function LiveMonitoringPage({
             </div>
             <h2 className="text-2xl font-bold">Tampilan Real-Time CCTV</h2>
             <p className="text-sm text-slate-300 mt-1">
-              Pantau frame kamera, status APD, dan hasil deteksi terbaru.
+              Pantau frame kamera RTSP, status APD, dan hasil deteksi terbaru.
             </p>
+            {selectedStreamStatus?.has_rtsp && (
+              <p className="text-xs text-slate-400 mt-2">
+                RTSP: {selectedStreamStatus.stream_state} - {selectedStreamStatus.stream_message}
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <select
@@ -229,12 +244,29 @@ export default function LiveMonitoringPage({
                 key={camera.camera}
                 className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-lg bg-slate-50 px-3 py-2"
               >
-                <span className="font-mono text-xs font-semibold text-gray-700">
-                  {camera.camera}
-                </span>
-                <span className="text-xs text-gray-500">
-                  {camera.count} deteksi
-                </span>
+                <div className="min-w-0">
+                  <span className="font-mono text-xs font-semibold text-gray-700">
+                    {camera.camera}
+                  </span>
+                  <p className="text-[11px] text-gray-400 truncate">
+                    {streamStatusByName[camera.camera]?.stream_message ||
+                      (camera.source === "registered" ? "Menunggu stream" : "Deteksi historis")}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <span
+                    className={`inline-flex rounded-full px-2 py-1 text-[10px] font-bold ${
+                      streamStatusByName[camera.camera]?.stream_state === "running"
+                        ? "bg-emerald-50 text-emerald-700"
+                        : streamStatusByName[camera.camera]?.stream_state === "error"
+                          ? "bg-red-50 text-red-700"
+                          : "bg-slate-100 text-slate-500"
+                    }`}
+                  >
+                    {streamStatusByName[camera.camera]?.stream_state || "idle"}
+                  </span>
+                  <p className="mt-1 text-xs text-gray-500">{camera.count} deteksi</p>
+                </div>
               </div>
             ))}
           </div>

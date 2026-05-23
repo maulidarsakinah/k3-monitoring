@@ -69,6 +69,11 @@ export default function TodayViolations({ violations, onViewDetail }) {
                 >
                   {row.status}
                 </span>
+                {row.autoReviewed && (
+                  <span className="ml-1 text-[10px] font-bold px-2 py-1 rounded-full bg-emerald-50 text-emerald-700">
+                    Auto
+                  </span>
+                )}
               </td>
 
               <td className="py-4 pr-4">

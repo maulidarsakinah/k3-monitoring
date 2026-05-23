@@ -86,6 +86,22 @@ def get_heatmap(start_date=None, end_date=None, camera_id=None, date_range=None)
     return heatmap
 
 
+def get_camera_breakdown(start_date=None, end_date=None, camera_id=None, date_range=None) -> list[dict]:
+    where, params = _build_date_filter(start_date, end_date, date_range)
+    if camera_id:
+        where += " AND camera_id = ?"
+        params.append(camera_id)
+    query = f"""
+        SELECT camera_id, COUNT(*) as count
+        FROM violations{where}
+        GROUP BY camera_id
+        ORDER BY count DESC
+    """
+    with _get_conn() as conn:
+        rows = conn.execute(query, params).fetchall()
+    return [{"camera": row[0], "count": row[1]} for row in rows]
+
+
 def get_kpi() -> dict:
     today = datetime.now().strftime("%Y-%m-%d")
     with _get_conn() as conn:

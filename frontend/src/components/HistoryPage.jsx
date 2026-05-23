@@ -19,11 +19,10 @@ import {
   Tv2,
   AlertTriangle,
   CheckCircle,
-  ChevronLeft,
-  ChevronRight,
   MessageSquare,
 } from "lucide-react";
 import ViolationBadges from "./common/ViolationBadges.jsx";
+import PaginationControls from "./common/PaginationControls.jsx";
 
 const COMMENT_KEY = "violation_internal_comments";
 
@@ -39,19 +38,29 @@ function saveComments(comments) {
   localStorage.setItem(COMMENT_KEY, JSON.stringify(comments));
 }
 
-export default function HistoryPage({ historyLog, selectedId = null }) {
+export default function HistoryPage({
+  historyLog,
+  currentPage: serverPage,
+  itemsPerPage: serverItemsPerPage,
+  onPageChange,
+  selectedId = null,
+  totalItems,
+}) {
   // Which row's detail panel is open (null = none)
   const [detailId, setDetailId] = useState(selectedId);
   const [comments, setComments] = useState(loadComments);
   const [commentDraft, setCommentDraft] = useState("");
 
   // Pagination state
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
+  const [localPage, setLocalPage] = useState(1);
+  const itemsPerPage = serverItemsPerPage || 10;
+  const currentPage = serverPage || localPage;
+  const handlePageChange = onPageChange || setLocalPage;
+  const totalHistoryItems = totalItems ?? historyLog.length;
 
   // Reset to page 1 if data changes
   useEffect(() => {
-    setCurrentPage(1);
+    if (!onPageChange) setLocalPage(1);
   }, [historyLog]);
 
   // Sync internal state if selectedId prop changes (from Dashboard)
@@ -82,9 +91,10 @@ export default function HistoryPage({ historyLog, selectedId = null }) {
   };
 
   // Pagination logic
-  const totalPages = Math.ceil(historyLog.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
-  const paginatedLog = historyLog.slice(startIndex, startIndex + itemsPerPage);
+  const paginatedLog = onPageChange
+    ? historyLog
+    : historyLog.slice(startIndex, startIndex + itemsPerPage);
 
   // Badge color per action type
   const actionStyle = {
@@ -108,7 +118,7 @@ export default function HistoryPage({ historyLog, selectedId = null }) {
   const actionIcon = {
     Notified: <CheckCircle size={15} className="text-blue-500" />,
     "Warning Issued": <AlertTriangle size={15} className="text-orange-500" />,
-    Dismissed: <X size={15} className="text-gray-400" />,
+    Dismissed: <X size={15} className="text-gray-500" />,
     Pending: <AlertTriangle size={15} className="text-yellow-500" />,
     Validated: <CheckCircle size={15} className="text-green-500" />,
   };
@@ -121,7 +131,7 @@ export default function HistoryPage({ historyLog, selectedId = null }) {
         <h2 className="text-xl font-bold text-gray-900 mb-1">
           Riwayat Pelanggaran
         </h2>
-        <p className="text-sm text-gray-400 mb-6">
+        <p className="text-sm text-gray-500 mb-6">
           Log lengkap semua kejadian yang terdeteksi
         </p>
 
@@ -164,7 +174,7 @@ export default function HistoryPage({ historyLog, selectedId = null }) {
                       isActive ? "bg-violet-50" : "hover:bg-gray-50"
                     }`}
                   >
-                    <td className="py-3 pr-4 text-gray-400 text-xs whitespace-nowrap">
+                    <td className="py-3 pr-4 text-gray-500 text-xs whitespace-nowrap">
                       {row.date}
                     </td>
                     <td className="py-3 pr-4 text-gray-700 font-mono font-medium whitespace-nowrap">
@@ -182,6 +192,11 @@ export default function HistoryPage({ historyLog, selectedId = null }) {
                       >
                         {row.action}
                       </span>
+                      {row.autoReviewed && (
+                        <span className="ml-1 text-[10px] font-bold px-2 py-1 rounded-full bg-emerald-50 text-emerald-700">
+                          Auto Review
+                        </span>
+                      )}
                     </td>
 
                     <td className="py-3 pr-4">
@@ -212,48 +227,13 @@ export default function HistoryPage({ historyLog, selectedId = null }) {
           </table>
         </div>
 
-        {/* ── PAGINATION CONTROLS ── */}
-        <div className="mt-6 flex items-center justify-between border-t border-gray-100 pt-4">
-          <p className="text-xs text-gray-400">
-            Menampilkan {startIndex + 1} -{" "}
-            {Math.min(startIndex + itemsPerPage, historyLog.length)} dari{" "}
-            {historyLog.length} kejadian
-          </p>
-          <div className="flex gap-2">
-            <button
-              disabled={currentPage === 1}
-              onClick={() => setCurrentPage((p) => p - 1)}
-              className="px-4 py-2 bg-gray-100 text-gray-600 text-xs font-bold rounded-lg disabled:opacity-50"
-            >
-              Sebelumnya
-            </button>
-
-            <div className="flex items-center gap-1">
-              {[...Array(totalPages)]
-                .map((_, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setCurrentPage(i + 1)}
-                    className={`w-8 h-8 rounded-lg text-xs font-bold transition-colors ${currentPage === i + 1 ? "bg-blue-500 text-white" : "text-gray-400 hover:bg-gray-50"}`}
-                  >
-                    {i + 1}
-                  </button>
-                ))
-                .slice(
-                  Math.max(0, currentPage - 2),
-                  Math.min(totalPages, currentPage + 1),
-                )}
-            </div>
-
-            <button
-              disabled={currentPage === totalPages || totalPages === 0}
-              onClick={() => setCurrentPage((p) => p + 1)}
-              className="px-4 py-2 bg-gray-100 text-gray-600 text-xs font-bold rounded-lg disabled:opacity-50"
-            >
-              Selanjutnya
-            </button>
-          </div>
-        </div>
+        <PaginationControls
+          currentPage={currentPage}
+          itemLabel="kejadian"
+          itemsPerPage={itemsPerPage}
+          onPageChange={handlePageChange}
+          totalItems={totalHistoryItems}
+        />
       </div>
 
       {/* ── RIGHT: Detail Panel ── */}
@@ -266,7 +246,7 @@ export default function HistoryPage({ historyLog, selectedId = null }) {
             </h3>
             <button
               onClick={() => setDetailId(null)}
-              className="text-gray-400 hover:text-gray-600 transition-colors"
+              className="text-gray-500 hover:text-gray-600 transition-colors"
             >
               <X size={16} />
             </button>
@@ -311,13 +291,13 @@ export default function HistoryPage({ historyLog, selectedId = null }) {
                 className="text-red-400 mt-0.5 shrink-0"
               />
               <div>
-                <p className="text-xs text-gray-400 mb-0.5">Tipe Pelanggaran</p>
+                <p className="text-xs text-gray-500 mb-0.5">Tipe Pelanggaran</p>
                 <ViolationBadges value={selected.violation} layout="list" />
               </div>
             </div>
 
             <div className="rounded-lg bg-slate-50 border border-slate-100 px-3 py-3">
-              <p className="text-xs font-bold uppercase text-gray-400 mb-3">
+              <p className="text-xs font-bold uppercase text-gray-500 mb-3">
                 Alur Pelanggaran
               </p>
               <div className="space-y-3 text-xs">
@@ -362,7 +342,7 @@ export default function HistoryPage({ historyLog, selectedId = null }) {
                 className="text-amber-400 mt-0.5 shrink-0"
               />
               <div>
-                <p className="text-xs text-gray-400 mb-1">Severity</p>
+                <p className="text-xs text-gray-500 mb-1">Severity</p>
                 <span
                   className={`text-xs font-bold px-2.5 py-1 rounded-full uppercase ${severityStyle[selected.severity] ?? severityStyle.none}`}
                 >
@@ -375,7 +355,7 @@ export default function HistoryPage({ historyLog, selectedId = null }) {
             <div className="flex items-start gap-3">
               <Clock size={16} className="text-blue-400 mt-0.5 shrink-0" />
               <div>
-                <p className="text-xs text-gray-400 mb-0.5">Timestamp</p>
+                <p className="text-xs text-gray-500 mb-0.5">Timestamp</p>
                 <p className="text-sm font-semibold text-gray-800">
                   {selected.summary || selected.date + ", " + selected.time}
                 </p>
@@ -386,7 +366,7 @@ export default function HistoryPage({ historyLog, selectedId = null }) {
             <div className="flex items-start gap-3">
               <Tv2 size={16} className="text-violet-400 mt-0.5 shrink-0" />
               <div>
-                <p className="text-xs text-gray-400 mb-0.5">Kamera</p>
+                <p className="text-xs text-gray-500 mb-0.5">Kamera</p>
                 <p className="text-sm font-semibold text-gray-800 font-mono">
                   {selected.camera}
                 </p>
@@ -397,11 +377,11 @@ export default function HistoryPage({ historyLog, selectedId = null }) {
             <div className="flex items-start gap-3">
               <div className="mt-0.5 shrink-0">
                 {actionIcon[selected.action] ?? (
-                  <CheckCircle size={15} className="text-gray-400" />
+                  <CheckCircle size={15} className="text-gray-500" />
                 )}
               </div>
               <div>
-                <p className="text-xs text-gray-400 mb-1">Tindakan</p>
+                <p className="text-xs text-gray-500 mb-1">Tindakan</p>
                 <span
                   className={`text-xs font-semibold px-3 py-1 rounded-full ${actionStyle[selected.action] ?? "bg-gray-100 text-gray-600"}`}
                 >
@@ -412,7 +392,7 @@ export default function HistoryPage({ historyLog, selectedId = null }) {
 
             {selected.validatedBy && (
               <div className="rounded-lg bg-slate-50 border border-slate-100 px-3 py-2">
-                <p className="text-xs text-gray-400 mb-1">Validasi</p>
+                <p className="text-xs text-gray-500 mb-1">Validasi</p>
                 <p className="text-xs font-semibold text-gray-700">
                   Oleh {selected.validatedBy}
                 </p>
@@ -422,10 +402,24 @@ export default function HistoryPage({ historyLog, selectedId = null }) {
               </div>
             )}
 
+            {selected.autoReviewed && (
+              <div className="rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-2">
+                <p className="text-xs font-bold uppercase text-emerald-700 mb-1">
+                  Auto Review
+                </p>
+                <p className="text-xs text-emerald-800">
+                  Incident ini selesai otomatis oleh sistem karena confidence tinggi.
+                </p>
+                {selected.staffNote && (
+                  <p className="text-xs text-emerald-800 mt-1">{selected.staffNote}</p>
+                )}
+              </div>
+            )}
+
             <div className="rounded-lg bg-slate-50 border border-slate-100 px-3 py-3">
               <div className="flex items-center gap-2 mb-3">
                 <MessageSquare size={15} className="text-violet-500" />
-                <p className="text-xs font-bold uppercase text-gray-400">
+                <p className="text-xs font-bold uppercase text-gray-500">
                   Komentar Internal
                 </p>
               </div>
@@ -433,11 +427,11 @@ export default function HistoryPage({ historyLog, selectedId = null }) {
                 {selectedComments.map((comment) => (
                   <div key={comment.id} className="rounded-lg bg-white border border-slate-100 px-3 py-2">
                     <p className="text-xs text-gray-700">{comment.text}</p>
-                    <p className="text-[10px] text-gray-400 mt-1">{comment.createdAt}</p>
+                    <p className="text-[10px] text-gray-500 mt-1">{comment.createdAt}</p>
                   </div>
                 ))}
                 {selectedComments.length === 0 && (
-                  <p className="text-xs text-gray-400">
+                  <p className="text-xs text-gray-500">
                     Belum ada komentar.
                   </p>
                 )}

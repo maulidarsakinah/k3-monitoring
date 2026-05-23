@@ -20,11 +20,15 @@ import {
   canManageSystem,
   canSubmitReport,
   canValidate,
+  getCameraStreamStatus,
   getDashboardData,
   getCameras,
   getStatistics,
   getHistoryLog,
   getPendingViolations,
+  getStatsCameras,
+  getStatsDistribution,
+  getStatsHeatmap,
   downloadExport,
 } from "./services/api.js";
 
@@ -43,8 +47,6 @@ import NotFoundPage from "./components/pages/NotFoundPage.jsx";
 import ReportsPage from "./components/pages/ReportsPage.jsx";
 import { formatDate } from "./utils/date.js";
 import {
-  buildCameraBreakdown,
-  buildHourlyBreakdown,
   buildNotifications,
   mapHistory,
   mapValidationQueue,
@@ -112,6 +114,8 @@ const mergeCameraSources = (registeredCameras = [], detectedCameras = []) => {
 export default function Dashboard({ user, onLogout, onSessionExpired }) {
   const [violations, setViolations] = useState([]);
   const [historyLog, setHistoryLog] = useState([]); // New state for history data
+  const [historyTotal, setHistoryTotal] = useState(0);
+  const [historyPage, setHistoryPage] = useState(1);
   const [validationQueue, setValidationQueue] = useState([]);
   const [stats, setStats] = useState({
     totalViolationsToday: 0,
@@ -122,6 +126,7 @@ export default function Dashboard({ user, onLogout, onSessionExpired }) {
   const [violationTypes, setViolationTypes] = useState([]);
   const [cameraBreakdown, setCameraBreakdown] = useState([]);
   const [registeredCameras, setRegisteredCameras] = useState([]);
+  const [cameraStreamStatuses, setCameraStreamStatuses] = useState([]);
   const [selectedCamera, setSelectedCamera] = useState(""); // State baru untuk filter kamera
   const [selectedSeverity, setSelectedSeverity] = useState("");
   const [hourlyBreakdown, setHourlyBreakdown] = useState([]);
@@ -171,17 +176,22 @@ export default function Dashboard({ user, onLogout, onSessionExpired }) {
         if (selectedCamera) apiParams.camera_id = selectedCamera; // Kirim filter kamera ke API
         if (selectedSeverity) apiParams.severity = selectedSeverity;
 
-        const [v, s, h, q, c] = await Promise.all([
+        const [v, s, h, q, c, streamStatus, dist, heatmap, camerasStats] = await Promise.all([
           getDashboardData(apiParams),
           getStatistics(apiParams),
-          getHistoryLog(apiParams),
+          getHistoryLog({ ...apiParams, page: historyPage, limit: ITEMS_PER_PAGE }),
           getPendingViolations(apiParams),
           getCameras(),
+          getCameraStreamStatus().catch(() => []),
+          getStatsDistribution(apiParams).catch(() => ({})),
+          getStatsHeatmap(apiParams).catch(() => ({})),
+          getStatsCameras(apiParams).catch(() => []),
         ]);
 
         // Remove timestamp filtering for testing purposes
         setViolations(mapViolations(v.violations || []));
-        setHistoryLog(mapHistory(h || [])); // Map and set history log data
+        setHistoryLog(mapHistory(h.violations || [])); // Map and set history log data
+        setHistoryTotal(h.total || 0);
         const mappedQueue = mapValidationQueue(q);
         if (canValidate(user?.role)) {
           setValidationQueue(
@@ -206,10 +216,17 @@ export default function Dashboard({ user, onLogout, onSessionExpired }) {
 
         setStats(s);
         setWeeklyTrend(s.weeklyTrend || []);
-        setViolationTypes(s.violationTypes || []);
-        setCameraBreakdown(buildCameraBreakdown(h || []));
+        setViolationTypes(
+          Object.entries(dist || {}).map(([type, count]) => ({ type, count })),
+        );
+        setCameraBreakdown(Array.isArray(camerasStats) ? camerasStats : []);
         setRegisteredCameras(Array.isArray(c) ? c : []);
-        setHourlyBreakdown(buildHourlyBreakdown(h || []));
+        setCameraStreamStatuses(Array.isArray(streamStatus) ? streamStatus : []);
+        setHourlyBreakdown(
+          Object.entries(heatmap || {})
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([hour, count]) => ({ hour: `${hour}:00`, count })),
+        );
       } catch (err) {
         console.error("API error:", err);
         if (err instanceof ApiError && err.status === 401) {
@@ -229,6 +246,7 @@ export default function Dashboard({ user, onLogout, onSessionExpired }) {
     customEndDate,
     selectedCamera,
     selectedSeverity,
+    historyPage,
     refreshKey,
     onSessionExpired,
     user?.role,
@@ -277,6 +295,10 @@ export default function Dashboard({ user, onLogout, onSessionExpired }) {
   useEffect(() => {
     setCurrentPage(1);
   }, [violations, searchQuery]); // Consolidated useEffect dependencies
+
+  useEffect(() => {
+    setHistoryPage(1);
+  }, [timeRange, customStartDate, customEndDate, selectedCamera, selectedSeverity]);
 
   useEffect(() => {
     const ids = loadReadNotificationIds(user?.username);
@@ -418,6 +440,7 @@ export default function Dashboard({ user, onLogout, onSessionExpired }) {
         return (
           <LiveMonitoringPage
             cameraBreakdown={cameraOptions}
+            cameraStreamStatuses={cameraStreamStatuses}
             latestViolations={violations}
             loading={loading}
             onRefresh={() => setRefreshKey((key) => key + 1)}
@@ -442,7 +465,11 @@ export default function Dashboard({ user, onLogout, onSessionExpired }) {
         return (
           <HistoryPage
             historyLog={filteredHistory}
+            currentPage={historyPage}
+            itemsPerPage={ITEMS_PER_PAGE}
+            onPageChange={setHistoryPage}
             selectedId={selectedHistoryId}
+            totalItems={historyTotal}
           />
         );
 
@@ -468,12 +495,7 @@ export default function Dashboard({ user, onLogout, onSessionExpired }) {
       case "reports":
         return userCanExport ? (
           <ReportsPage
-            cameraBreakdown={cameraOptions}
             historyLog={filteredHistory}
-            hourlyBreakdown={hourlyBreakdown}
-            stats={stats}
-            violationTypes={violationTypes}
-            weeklyTrend={weeklyTrend}
             onOpenExport={() => setExportDialogOpen(true)}
           />
         ) : (
@@ -517,6 +539,7 @@ export default function Dashboard({ user, onLogout, onSessionExpired }) {
       {exportDialogOpen && (
         <ExportDialog
           cameras={cameraOptions}
+          historyLog={filteredHistory}
           exporting={exporting}
           selectedCamera={selectedCamera}
           selectedSeverity={selectedSeverity}

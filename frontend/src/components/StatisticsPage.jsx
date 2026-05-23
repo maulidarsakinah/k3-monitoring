@@ -59,7 +59,7 @@ function Skeleton({ className = "" }) {
 // ── Empty State ────────────────────────────────────────────
 function EmptyState({ label = "Belum ada data" }) {
   return (
-    <div className="flex flex-col items-center justify-center h-40 text-slate-400 gap-2">
+    <div className="flex flex-col items-center justify-center h-40 text-slate-500 gap-2">
       <Activity size={32} strokeWidth={1.5} />
       <p className="text-sm font-medium">{label}</p>
     </div>
@@ -69,30 +69,27 @@ function EmptyState({ label = "Belum ada data" }) {
 // ── KPI Card ───────────────────────────────────────────────
 function KpiCard({ icon: Icon, label, value, sub, color = "slate", loading }) {
   const colorMap = {
-    red: { bg: "bg-red-50", text: "text-red-600", val: "text-red-700" },
+    red: { bg: "bg-red-50", text: "text-red-600" },
     green: {
       bg: "bg-emerald-50",
       text: "text-emerald-600",
-      val: "text-emerald-700",
     },
     yellow: {
       bg: "bg-amber-50",
       text: "text-amber-600",
-      val: "text-amber-700",
     },
     indigo: {
       bg: "bg-indigo-50",
       text: "text-indigo-600",
-      val: "text-indigo-700",
     },
-    rose: { bg: "bg-rose-50", text: "text-rose-600", val: "text-rose-700" },
-    slate: { bg: "bg-slate-50", text: "text-slate-600", val: "text-slate-800" },
+    rose: { bg: "bg-rose-50", text: "text-rose-600" },
+    slate: { bg: "bg-slate-50", text: "text-slate-600" },
   };
   const c = colorMap[color] || colorMap.slate;
 
   if (loading) {
     return (
-      <div className="bg-white rounded-2xl border border-slate-100 p-5 shadow-sm space-y-3">
+      <div className="bg-white rounded-2xl border border-slate-100 p-5 space-y-3">
         <Skeleton className="h-8 w-8" />
         <Skeleton className="h-4 w-24" />
         <Skeleton className="h-7 w-16" />
@@ -101,17 +98,40 @@ function KpiCard({ icon: Icon, label, value, sub, color = "slate", loading }) {
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-100 p-5 shadow-sm hover:shadow-md transition-shadow duration-200 group">
+    <div className="bg-white rounded-2xl border border-slate-100 p-5">
       <div className={`p-2 ${c.bg} w-fit rounded-xl ${c.text} mb-3`}>
         <Icon size={18} strokeWidth={2} />
       </div>
-      <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-1">
+      <p className="text-xs font-bold uppercase text-slate-500 mb-1">
         {label}
       </p>
-      <h3 className={`text-2xl font-extrabold tracking-tight ${c.val}`}>
+      <h3 className="text-2xl font-bold text-slate-900 mt-1">
         {value}
       </h3>
-      {sub && <p className="text-xs text-slate-400 mt-1">{sub}</p>}
+      {sub && <p className="text-xs text-slate-500 mt-1">{sub}</p>}
+    </div>
+  );
+}
+
+function InsightMetric({ icon: Icon, label, value, hint, loading }) {
+  if (loading) {
+    return (
+      <div className="bg-white rounded-2xl border border-slate-100 p-5 space-y-3">
+        <Skeleton className="h-8 w-8" />
+        <Skeleton className="h-4 w-28" />
+        <Skeleton className="h-6 w-32" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-100 p-5">
+      <div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-700 flex items-center justify-center mb-4">
+        <Icon size={19} />
+      </div>
+      <p className="text-xs font-bold uppercase text-slate-500">{label}</p>
+      <p className="text-xl font-bold text-slate-900 mt-1 truncate">{value}</p>
+      {hint && <p className="text-xs text-slate-500 mt-1">{hint}</p>}
     </div>
   );
 }
@@ -120,14 +140,14 @@ function KpiCard({ icon: Icon, label, value, sub, color = "slate", loading }) {
 function ChartCard({ title, subtitle, children, loading, className = "" }) {
   return (
     <div
-      className={`bg-white rounded-2xl border border-slate-100 p-6 shadow-sm ${className}`}
+      className={`bg-white rounded-2xl border border-slate-100 p-6 ${className}`}
     >
       <div className="mb-5">
-        <h2 className="text-sm font-bold uppercase tracking-widest text-slate-700">
+        <h3 className="font-bold text-slate-900">
           {title}
-        </h2>
+        </h3>
         {subtitle && (
-          <p className="text-xs text-slate-400 mt-0.5">{subtitle}</p>
+          <p className="text-sm text-slate-500 mt-1">{subtitle}</p>
         )}
       </div>
       {loading ? (
@@ -171,15 +191,15 @@ function TopViolations({ data }) {
     <div className="space-y-3">
       {data.slice(0, 5).map((item, i) => (
         <div key={item.type} className="flex items-center gap-3">
-          <span className="w-5 text-xs font-bold text-slate-400 shrink-0">
+          <span className="w-6 text-xs font-bold text-slate-500 shrink-0">
             #{i + 1}
           </span>
           <div className="flex-1 min-w-0">
-            <div className="flex justify-between text-xs mb-1">
+            <div className="flex justify-between text-sm mb-1">
               <span className="font-semibold text-slate-700 truncate">
                 {item.type}
               </span>
-              <span className="text-slate-500 ml-2 shrink-0">{item.count}</span>
+              <span className="text-slate-600 font-bold ml-2 shrink-0">{item.count}</span>
             </div>
             <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
               <div
@@ -202,9 +222,9 @@ function InsightBanner({ insights }) {
   if (!insights?.length) return null;
   return (
     <div className="bg-slate-900 text-white rounded-2xl p-5 flex flex-wrap gap-4">
-      <div className="flex items-center gap-2 text-slate-400 shrink-0">
+      <div className="flex items-center gap-2 text-slate-300 shrink-0">
         <Shield size={16} />
-        <span className="text-xs font-bold uppercase tracking-widest">
+        <span className="text-xs font-bold uppercase">
           Auto Insight
         </span>
       </div>
@@ -336,6 +356,16 @@ export default function StatisticsPage({
     [trendData],
   );
 
+  const topViolation = pieData[0];
+  const topCamera = useMemo(
+    () => [...cameraBreakdown].sort((a, b) => b.count - a.count)[0],
+    [cameraBreakdown],
+  );
+  const topHour = useMemo(
+    () => [...hourlyBreakdown].sort((a, b) => b.count - a.count)[0],
+    [hourlyBreakdown],
+  );
+
   const insights = useMemo(
     () =>
       buildInsights({
@@ -357,28 +387,25 @@ export default function StatisticsPage({
   const trendColor = trendChange > 0 ? "red" : "green";
 
   return (
-    <div className="space-y-5 font-sans">
-      {/* ── HEADER ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+    <div className="space-y-5">
+      <div className="bg-white rounded-2xl border border-slate-100 p-6">
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-extrabold tracking-tight text-slate-900">
-            Analytics K3
-          </h1>
-          <p className="text-xs text-slate-400 mt-0.5">
+          <h2 className="text-xl font-bold text-slate-900">Analytics K3</h2>
+          <p className="text-sm text-slate-500 mt-1">
             Monitoring incident APD dan proses validasi secara real-time
           </p>
         </div>
-        {/* Time Range Filter (Moved from Dashboard header to here for better context) */}
         <div className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 bg-slate-50 text-slate-700 text-xs font-semibold px-3 py-1.5 rounded-full border border-slate-100">
+          <span className="inline-flex items-center gap-1.5 bg-slate-50 text-slate-700 text-xs font-bold px-3 py-1.5 rounded-full border border-slate-100">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />{" "}
             Live Data
           </span>
         </div>
+        </div>
       </div>
 
-      {/* ── KPI CARDS ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
         <KpiCard
           icon={Shield}
           label="Total Semua"
@@ -425,6 +452,30 @@ export default function StatisticsPage({
           value={`${trendChange > 0 ? "+" : ""}${trendChange}%`}
           sub="vs hari kemarin"
           color={trendColor}
+          loading={loading}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <InsightMetric
+          icon={AlertTriangle}
+          label="Top Pelanggaran"
+          value={topViolation?.type || "-"}
+          hint={topViolation ? `${topViolation.count} kejadian` : "Belum ada data"}
+          loading={loading}
+        />
+        <InsightMetric
+          icon={Camera}
+          label="Area Paling Rawan"
+          value={topCamera?.camera || "-"}
+          hint={topCamera ? `${topCamera.count} deteksi` : "Belum ada data"}
+          loading={loading}
+        />
+        <InsightMetric
+          icon={Clock}
+          label="Jam Rawan"
+          value={topHour?.hour || "-"}
+          hint={topHour ? `${topHour.count} deteksi` : "Belum ada data"}
           loading={loading}
         />
       </div>
@@ -476,12 +527,12 @@ export default function StatisticsPage({
                 />
                 <XAxis
                   dataKey="day"
-                  tick={{ fontSize: 11, fill: "#94a3b8" }}
+                  tick={{ fontSize: 12, fontWeight: 600, fill: "#475569" }}
                   axisLine={false}
                   tickLine={false}
                 />
                 <YAxis
-                  tick={{ fontSize: 11, fill: "#94a3b8" }}
+                  tick={{ fontSize: 12, fontWeight: 600, fill: "#475569" }}
                   axisLine={false}
                   tickLine={false}
                 />
@@ -538,7 +589,7 @@ export default function StatisticsPage({
                 {pieData.slice(0, 5).map((item, i) => (
                   <div
                     key={item.type}
-                    className="flex items-center justify-between text-xs"
+                    className="flex items-center justify-between text-sm"
                   >
                     <div className="flex items-center gap-2 min-w-0">
                       <span
@@ -547,7 +598,7 @@ export default function StatisticsPage({
                           background: PALETTE.pie[i % PALETTE.pie.length],
                         }}
                       />
-                      <span className="text-slate-600 truncate">
+                      <span className="font-semibold text-slate-700 truncate">
                         {item.type}
                       </span>
                     </div>
@@ -587,19 +638,19 @@ export default function StatisticsPage({
                 />
                 <XAxis
                   dataKey="day"
-                  tick={{ fontSize: 11, fill: "#94a3b8" }}
+                  tick={{ fontSize: 12, fontWeight: 600, fill: "#475569" }}
                   axisLine={false}
                   tickLine={false}
                 />
                 <YAxis
-                  tick={{ fontSize: 11, fill: "#94a3b8" }}
+                  tick={{ fontSize: 12, fontWeight: 600, fill: "#475569" }}
                   axisLine={false}
                   tickLine={false}
                 />
                 <Tooltip content={<CustomTooltip />} />
                 <Legend
-                  wrapperStyle={{ fontSize: 11, paddingTop: 12 }}
-                  formatter={(v) => <span className="text-slate-500">{v}</span>}
+                  wrapperStyle={{ fontSize: 12, fontWeight: 600, paddingTop: 12 }}
+                  formatter={(v) => <span className="text-slate-700">{v}</span>}
                 />
                 <Bar
                   dataKey="Disetujui"
@@ -636,18 +687,18 @@ export default function StatisticsPage({
           {!loading && (
             <div className="mt-5 pt-4 border-t border-slate-100 grid grid-cols-2 gap-3">
               <div className="bg-emerald-50 rounded-xl p-3 text-center">
-                <p className="text-xs text-emerald-600 font-semibold mb-0.5">
+                <p className="text-xs text-emerald-700 font-bold mb-0.5">
                   Validasi
                 </p>
-                <p className="text-lg font-extrabold text-emerald-700">
+                <p className="text-lg font-bold text-emerald-800">
                   {validationRate}%
                 </p>
               </div>
               <div className="bg-red-50 rounded-xl p-3 text-center">
-                <p className="text-xs text-red-600 font-semibold mb-0.5">
+                <p className="text-xs text-red-700 font-bold mb-0.5">
                   Rejection
                 </p>
-                <p className="text-lg font-extrabold text-red-700">
+                <p className="text-lg font-bold text-red-800">
                   {rejectionRate}%
                 </p>
               </div>
@@ -720,12 +771,12 @@ export default function StatisticsPage({
                 />
                 <XAxis
                   dataKey="hour"
-                  tick={{ fontSize: 10, fill: "#94a3b8" }}
+                  tick={{ fontSize: 12, fontWeight: 600, fill: "#475569" }}
                   axisLine={false}
                   tickLine={false}
                 />
                 <YAxis
-                  tick={{ fontSize: 10, fill: "#94a3b8" }}
+                  tick={{ fontSize: 12, fontWeight: 600, fill: "#475569" }}
                   axisLine={false}
                   tickLine={false}
                 />

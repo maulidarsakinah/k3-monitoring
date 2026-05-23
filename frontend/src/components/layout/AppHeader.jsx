@@ -40,7 +40,7 @@ export default function AppHeader({
   userCanExport,
 }) {
   return (
-    <header className="bg-white border-b border-gray-100 px-6 py-4 flex items-center gap-4">
+    <header className="bg-white border-b border-gray-100 px-4 sm:px-6 py-4 flex flex-wrap items-center gap-3">
       <button
         onClick={onOpenSidebar}
         className="lg:hidden text-gray-500 hover:text-gray-700"
@@ -49,35 +49,35 @@ export default function AppHeader({
         <Menu size={22} />
       </button>
 
-      <div className="flex-1 relative max-w-sm">
+      <div className="order-2 w-full sm:order-none sm:flex-1 relative sm:max-w-sm">
         <Search
-          size={15}
-          className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+          size={16}
+          className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"
         />
         <input
           type="text"
           placeholder="Cari pelanggaran atau kamera..."
           value={searchQuery}
           onChange={(event) => setSearchQuery(event.target.value)}
-          className="w-full pl-9 pr-4 py-2 text-sm bg-gray-100 rounded-full outline-none focus:ring-2 focus:ring-violet-300 transition"
+          className="h-11 w-full pl-9 pr-4 text-sm font-medium bg-gray-100 text-slate-700 placeholder:text-slate-500 rounded-full outline-none focus:ring-2 focus:ring-violet-300 transition"
         />
       </div>
 
-      <div className="flex-1" />
+      <div className="hidden lg:block flex-1" />
 
       <button
         onClick={onRefresh}
-        className="hidden sm:inline-flex items-center gap-2 text-[10px] bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold rounded-lg px-3 py-2"
+        className="order-3 sm:order-none inline-flex h-11 items-center gap-2 bg-gray-100 hover:bg-gray-200 text-slate-700 font-bold rounded-lg px-4 text-sm"
         title="Refresh data"
       >
-        <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
+        <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
         Refresh
       </button>
 
       <select
         value={selectedCamera}
         onChange={(event) => setSelectedCamera(event.target.value)}
-        className="text-[10px] bg-gray-100 border-none rounded-lg px-3 py-2 mr-2 outline-none font-bold text-gray-600"
+        className="order-3 sm:order-none h-11 min-w-[10rem] flex-1 sm:flex-none bg-gray-100 border-none rounded-lg px-3 outline-none font-bold text-sm text-slate-700"
       >
         <option value="">Semua Kamera</option>
         {cameraBreakdown.map((camera) => (
@@ -90,7 +90,7 @@ export default function AppHeader({
       <select
         value={selectedSeverity}
         onChange={(event) => setSelectedSeverity(event.target.value)}
-        className="text-[10px] bg-gray-100 border-none rounded-lg px-3 py-2 mr-2 outline-none font-bold text-gray-600"
+        className="order-3 sm:order-none h-11 min-w-[10rem] flex-1 sm:flex-none bg-gray-100 border-none rounded-lg px-3 outline-none font-bold text-sm text-slate-700"
       >
         {SEVERITY_OPTIONS.map((item) => (
           <option key={item.value} value={item.value}>
@@ -100,29 +100,29 @@ export default function AppHeader({
       </select>
 
       {userCanExport && (
-        <div className="hidden md:flex items-center gap-2">
+        <div className="order-3 sm:order-none flex items-center gap-2">
           <button
             disabled={Boolean(exporting)}
             onClick={onExport}
-            className="inline-flex items-center gap-1.5 text-[10px] bg-[#0d1b2a] hover:bg-[#1a2f47] disabled:opacity-60 text-white font-bold rounded-lg px-3 py-2 uppercase"
+            className="inline-flex h-11 items-center gap-2 bg-[#0d1b2a] hover:bg-[#1a2f47] disabled:opacity-60 text-white font-bold rounded-lg px-4 text-sm"
           >
-            <Download size={13} />
+            <Download size={16} />
             {exporting ? "..." : "Export"}
           </button>
         </div>
       )}
 
       {activePage === "statistics" && (
-        <div className="flex items-center gap-2 mr-4">
-          <div className="flex bg-gray-100 p-1 rounded-xl">
+        <div className="order-4 w-full xl:w-auto flex flex-wrap items-center gap-2 xl:mr-4">
+          <div className="flex max-w-full overflow-x-auto bg-gray-100 p-1 rounded-xl">
             {TIME_RANGES.map((range) => (
               <button
                 key={range.id}
                 onClick={() => setTimeRange(range.id)}
-                className={`px-3 py-1.5 text-[10px] font-bold rounded-lg transition-all ${
+                className={`px-4 py-2 text-sm font-bold rounded-lg transition-all ${
                   timeRange === range.id
                     ? "bg-white text-violet-600 shadow-sm"
-                    : "text-gray-500 hover:text-gray-700"
+                    : "text-slate-600 hover:text-slate-800"
                 }`}
               >
                 {range.label}
@@ -135,14 +135,14 @@ export default function AppHeader({
                 type="date"
                 value={customStartDate}
                 onChange={(event) => setCustomStartDate(event.target.value)}
-                className="text-[10px] bg-gray-100 border-none rounded-lg px-2 py-1.5 focus:ring-1 focus:ring-violet-300 outline-none"
+                className="h-10 text-sm font-semibold text-slate-700 bg-gray-100 border-none rounded-lg px-3 focus:ring-1 focus:ring-violet-300 outline-none"
               />
-              <span className="text-gray-400 text-[10px]">-</span>
+              <span className="text-slate-500 text-sm">-</span>
               <input
                 type="date"
                 value={customEndDate}
                 onChange={(event) => setCustomEndDate(event.target.value)}
-                className="text-[10px] bg-gray-100 border-none rounded-lg px-2 py-1.5 focus:ring-1 focus:ring-violet-300 outline-none"
+                className="h-10 text-sm font-semibold text-slate-700 bg-gray-100 border-none rounded-lg px-3 focus:ring-1 focus:ring-violet-300 outline-none"
               />
             </div>
           )}
@@ -150,7 +150,7 @@ export default function AppHeader({
       )}
 
       <button
-        className="relative text-gray-500 hover:text-gray-700"
+        className="relative text-slate-600 hover:text-slate-800"
         onClick={() => onNavigate("notification")}
         aria-label="Buka notifikasi"
       >
@@ -162,7 +162,7 @@ export default function AppHeader({
         )}
       </button>
 
-      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-pink-500 flex items-center justify-center text-white text-xs font-bold shrink-0">
+      <div className="w-9 h-9 rounded-full bg-gradient-to-br from-violet-500 to-pink-500 flex items-center justify-center text-white text-sm font-bold shrink-0">
         {(user?.username || "OP").slice(0, 2).toUpperCase()}
       </div>
     </header>

@@ -59,7 +59,7 @@ export default function NotificationPage({
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-6">
         <div>
           <h2 className="text-xl font-bold text-gray-900">Notifikasi</h2>
-          <p className="text-sm text-gray-400 mt-1">
+          <p className="text-sm text-gray-500 mt-1">
             Daftar peringatan pelanggaran dan perubahan status validasi.
           </p>
         </div>
@@ -80,9 +80,9 @@ export default function NotificationPage({
 
       {notifications.length === 0 ? (
         <div className="rounded-xl border border-dashed border-gray-200 p-10 text-center">
-          <Bell size={34} className="mx-auto text-gray-300 mb-3" />
+          <Bell size={34} className="mx-auto text-gray-400 mb-3" />
           <h3 className="font-bold text-gray-900">Belum ada notifikasi</h3>
-          <p className="text-sm text-gray-400 mt-1">
+          <p className="text-sm text-gray-500 mt-1">
             Peringatan baru akan muncul setelah kamera mendeteksi pelanggaran.
           </p>
         </div>
@@ -138,10 +138,10 @@ export default function NotificationPage({
               </div>
 
               <div className="hidden lg:flex flex-col items-end justify-between text-right">
-                <span className="text-xs text-gray-400 whitespace-nowrap">
+                <span className="text-xs text-gray-500 whitespace-nowrap">
                   {notif.time}
                 </span>
-                <span className="text-[10px] font-semibold text-gray-400">
+                <span className="text-[10px] font-semibold text-gray-500">
                   ID #{notif.id}
                 </span>
               </div>

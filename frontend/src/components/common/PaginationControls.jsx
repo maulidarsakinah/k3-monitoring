@@ -10,7 +10,7 @@ export default function PaginationControls({
 
   return (
     <div className="mt-6 flex items-center justify-between border-t border-gray-100 pt-4">
-      <p className="text-xs text-gray-400">
+      <p className="text-xs text-gray-500">
         Menampilkan {totalItems === 0 ? 0 : startIndex + 1} -{" "}
         {Math.min(startIndex + itemsPerPage, totalItems)} dari {totalItems}{" "}
         {itemLabel}
@@ -33,7 +33,7 @@ export default function PaginationControls({
                 className={`w-8 h-8 rounded-lg text-xs font-bold transition-colors ${
                   currentPage === index + 1
                     ? "bg-blue-500 text-white"
-                    : "text-gray-400 hover:bg-gray-50"
+                    : "text-gray-500 hover:bg-gray-50"
                 }`}
               >
                 {index + 1}

@@ -11,7 +11,7 @@ export default function ViolationBadges({
         .filter(Boolean);
 
   if (items.length === 0) {
-    return <span className="text-xs text-gray-400">{emptyLabel}</span>;
+    return <span className="text-xs text-gray-500">{emptyLabel}</span>;
   }
 
   if (layout === "list") {

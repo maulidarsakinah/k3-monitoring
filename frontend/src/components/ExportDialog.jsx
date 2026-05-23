@@ -20,6 +20,7 @@ const SEVERITY_OPTIONS = [
 
 export default function ExportDialog({
   cameras = [],
+  historyLog = [],
   exporting,
   onClose,
   onExport,
@@ -39,6 +40,15 @@ export default function ExportDialog({
     () => getExportDateRange(period, customStartDate, customEndDate),
     [period, customStartDate, customEndDate],
   );
+
+  const estimatedRows = useMemo(() => {
+    return historyLog.filter((item) => {
+      if (cameraId && item.camera !== cameraId) return false;
+      if (status && item.rawStatus !== status && item.action !== status) return false;
+      if (severity && item.severity !== severity) return false;
+      return true;
+    }).length;
+  }, [historyLog, cameraId, status, severity]);
 
   const handleSubmit = () => {
     setError("");
@@ -61,13 +71,13 @@ export default function ExportDialog({
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
           <div>
             <h2 className="text-lg font-bold text-slate-900">Export Laporan</h2>
-            <p className="text-sm text-slate-400">
+            <p className="text-sm text-slate-500">
               Pilih format dan rentang data pelanggaran.
             </p>
           </div>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600"
+            className="text-slate-500 hover:text-slate-600"
             aria-label="Tutup export"
           >
             <X size={18} />
@@ -204,10 +214,28 @@ export default function ExportDialog({
             </label>
           </div>
 
-          <div className="rounded-lg bg-slate-50 border border-slate-100 px-3 py-2 text-xs text-slate-500 flex items-center gap-2">
-            <FileText size={14} />
-            Rentang: {dateRange.start_date || "awal"} sampai{" "}
-            {dateRange.end_date || "akhir"}
+          <div className="rounded-lg bg-slate-50 border border-slate-100 px-3 py-3 text-xs text-slate-600 space-y-2">
+            <div className="flex items-center gap-2 font-bold">
+              <FileText size={14} />
+              Preview export: {estimatedRows} data dari hasil yang sedang termuat
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <span className="rounded-full bg-white border border-slate-200 px-2.5 py-1">
+                {format.toUpperCase()}
+              </span>
+              <span className="rounded-full bg-white border border-slate-200 px-2.5 py-1">
+                {dateRange.start_date || "awal"} s/d {dateRange.end_date || "akhir"}
+              </span>
+              <span className="rounded-full bg-white border border-slate-200 px-2.5 py-1">
+                {cameraId || "Semua kamera"}
+              </span>
+              <span className="rounded-full bg-white border border-slate-200 px-2.5 py-1">
+                {STATUS_OPTIONS.find((item) => item.value === status)?.label || "Semua status"}
+              </span>
+              <span className="rounded-full bg-white border border-slate-200 px-2.5 py-1">
+                {SEVERITY_OPTIONS.find((item) => item.value === severity)?.label || "Semua severity"}
+              </span>
+            </div>
           </div>
         </div>
 

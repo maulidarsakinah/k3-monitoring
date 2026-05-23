@@ -16,7 +16,7 @@ export default function DashboardHome({
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="rounded-2xl border border-amber-100 bg-amber-50 p-5">
+        <div className="attention-card rounded-2xl border border-amber-200 bg-amber-50 p-5">
           <div className="flex items-center gap-2 mb-2">
             <BellRing size={18} className="text-amber-700" />
             <h2 className="font-bold text-amber-950">Perlu Perhatian</h2>
@@ -31,7 +31,7 @@ export default function DashboardHome({
       </div>
 
       {reminderItems.length > 0 && (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
+        <div className="attention-card rounded-2xl border border-amber-200 bg-amber-50 p-5">
           <div className="flex items-center gap-2 mb-3">
             <AlertTriangle size={18} className="text-amber-700" />
             <h3 className="font-bold text-amber-950">Incident Perlu Ditinjau</h3>
@@ -40,7 +40,7 @@ export default function DashboardHome({
             {reminderItems.slice(0, 4).map((item) => (
               <div
                 key={item.id}
-                className="rounded-xl bg-white/70 border border-amber-100 px-4 py-3 text-sm"
+                className="attention-item rounded-xl bg-white/75 border border-amber-100 px-4 py-3 text-sm"
               >
                 <p className="font-bold text-slate-900">
                   ID #{item.id} - {item.camera}
@@ -63,11 +63,11 @@ export default function DashboardHome({
           label="Total Pelanggaran Hari Ini"
           value={stats.totalViolationsToday}
         />
-        <StatCard
-          label="Tingkat Validasi (%)"
-          value={`${stats.validationRate ?? stats.complianceRate}%`}
-        />
         <StatCard label="Pending Validasi" value={stats.pendingValidasi} />
+        <StatCard
+          label="Total Pelanggaran Global"
+          value={stats.totalViolations ?? 0}
+        />
       </div>
 
       <div className="bg-white rounded-2xl border border-gray-100 p-6 flex flex-col h-[720px]">

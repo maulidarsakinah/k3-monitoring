@@ -34,6 +34,7 @@ export function mapViolations(apiData = []) {
     kamera: item.camera_id,
     status: STATUS_LABEL[item.status] || item.status || "Pending",
     severity: item.severity || "none",
+    autoReviewed: item.staff_reviewed_by === "system",
   }));
 }
 
@@ -61,6 +62,7 @@ export function mapHistory(apiData = []) {
       reportSentAt: item.report_sent_at ? formatTimestamp(item.report_sent_at) : "",
       reportNote: item.report_note,
       staffReviewedBy: item.staff_reviewed_by,
+      autoReviewed: item.staff_reviewed_by === "system",
       staffReviewedAt: item.staff_reviewed_at ? formatTimestamp(item.staff_reviewed_at) : "",
       staffNote: item.staff_note,
       firstDetectedAt: item.first_detected_at ? formatTimestamp(item.first_detected_at) : "",
@@ -91,6 +93,7 @@ export function mapValidationQueue(apiData = []) {
     reportNote: item.report_note,
     reportSent: Boolean(item.report_sent_at) || item.status === "needs_manager",
     staffReviewedBy: item.staff_reviewed_by,
+    autoReviewed: item.staff_reviewed_by === "system",
     staffReviewedAt: item.staff_reviewed_at ? formatTimestamp(item.staff_reviewed_at) : "",
     staffNote: item.staff_note,
     firstDetectedAt: item.first_detected_at ? formatTimestamp(item.first_detected_at) : "",
