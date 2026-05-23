@@ -291,9 +291,9 @@ export const deleteRule = (id) =>
   });
 
 export const downloadExport = async (format, params = {}) => {
-  const query = toQuery(params);
+  const query = toQuery({ format, ...params });
   const res = await fetch(
-    `${BASE_URL}/violations/export/${format}${query ? `?${query}` : ""}`,
+    `${BASE_URL}/reports/export${query ? `?${query}` : ""}`,
     { headers: getAuthHeader() },
   );
 

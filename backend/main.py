@@ -67,6 +67,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition"],
 )
 app.mount("/evidence", StaticFiles(directory=str(EVIDENCE_DIR), check_dir=False), name="evidence")
 
@@ -394,6 +395,63 @@ async def clear_all_violations(current_user=Depends(auth.require_admin)):
 
 # ─── Export Laporan ────────────────────────────────────────────────────────────
 
+def build_export_response(format: str, data: list[dict], title: str = "Laporan Pelanggaran APD") -> StreamingResponse:
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    if format == "csv":
+        file_bytes = export_module.export_csv(data)
+        filename = f"laporan_apd_{timestamp}.csv"
+        media_type = "text/csv"
+    elif format == "pdf":
+        try:
+            file_bytes = export_module.export_pdf(data, title=title)
+        except ImportError:
+            raise HTTPException(
+                status_code=503,
+                detail="Library reportlab belum terinstall. Jalankan: pip install reportlab"
+            )
+        filename = f"laporan_apd_{timestamp}.pdf"
+        # Octet-stream keeps browser extensions such as IDM from intercepting
+        # the CORS fetch before the frontend can download the blob.
+        media_type = "application/octet-stream"
+    else:
+        raise HTTPException(status_code=400, detail="Format export harus csv atau pdf")
+
+    return StreamingResponse(
+        io.BytesIO(file_bytes),
+        media_type=media_type,
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
+@app.get("/reports/export", tags=["Export"])
+async def export_report(
+    format: str = Query("pdf", description="csv / pdf"),
+    start_date: str = None,
+    end_date: str = None,
+    camera_id: str = None,
+    status: str = None,
+    severity: str = None,
+    date_range: str = Query(None, description="today / weekly / monthly"),
+    current_user=Depends(auth.require_hr)
+):
+    """
+    Export laporan lewat endpoint generik.
+
+    Endpoint ini dipakai frontend agar download blob PDF/CSV tidak mudah
+    diintersep extension browser seperti IDM.
+    """
+    export_format = (format or "").lower()
+    data = db.get_all_for_export(start_date=start_date, end_date=end_date,
+                                  camera_id=camera_id, status=status,
+                                  severity=severity, date_range=date_range)
+    title = "Laporan Pelanggaran APD"
+    if start_date or end_date:
+        title += f" ({start_date or '...'} s/d {end_date or '...'})"
+
+    return build_export_response(export_format, data, title=title)
+
+
 @app.get("/violations/export/csv", tags=["Export"])
 async def export_csv(
     start_date: str = None,
@@ -411,13 +469,7 @@ async def export_csv(
     data = db.get_all_for_export(start_date=start_date, end_date=end_date,
                                   camera_id=camera_id, status=status,
                                   severity=severity, date_range=date_range)
-    csv_bytes = export_module.export_csv(data)
-    filename = f"laporan_apd_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-    return StreamingResponse(
-        io.BytesIO(csv_bytes),
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
-    )
+    return build_export_response("csv", data)
 
 
 @app.get("/violations/export/pdf", tags=["Export"])
@@ -441,20 +493,7 @@ async def export_pdf(
     if start_date or end_date:
         title += f" ({start_date or '...'} s/d {end_date or '...'})"
 
-    try:
-        pdf_bytes = export_module.export_pdf(data, title=title)
-    except ImportError:
-        raise HTTPException(
-            status_code=503,
-            detail="Library reportlab belum terinstall. Jalankan: pip install reportlab"
-        )
-
-    filename = f"laporan_apd_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-    return StreamingResponse(
-        io.BytesIO(pdf_bytes),
-        media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
-    )
+    return build_export_response("pdf", data, title=title)
 
 
 # ─── Cameras ───────────────────────────────────────────────────────────────────

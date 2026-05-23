@@ -134,8 +134,9 @@ export function buildHourlyBreakdown(items = []) {
 }
 
 export function buildNotifications(items = [], role = "operator") {
+  const sourceItems = Array.isArray(items) ? items : items.violations || [];
   const isManager = ["admin", "manager"].includes(role);
-  const filteredItems = items.filter((item) => {
+  const filteredItems = sourceItems.filter((item) => {
     if (isManager) return item.status === "needs_manager" || ["approved", "rejected"].includes(item.status);
     return ["detected", "pending", "staff_reviewed", "needs_manager"].includes(item.status);
   });

@@ -207,7 +207,7 @@ export default function Dashboard({ user, onLogout, onSessionExpired }) {
           setValidationQueue([]);
         }
         setNotifications(
-          buildNotifications(h || [], user?.role).map((notification) => ({
+          buildNotifications(h.violations || [], user?.role).map((notification) => ({
             ...notification,
             read:
               notification.read || readNotificationIds.has(notification.id),
