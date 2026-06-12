@@ -8,6 +8,7 @@ Dokumentasi ini menjelaskan cara menjalankan aplikasi, role user, alur kerja, da
 
 - Backend: FastAPI, SQLite, WebSocket, OpenCV
 - Frontend: React, Vite, Tailwind CSS
+- Monorepo tooling: pnpm workspace
 - Database lokal: SQLite
 - Komunikasi real-time: WebSocket
 - Export laporan: CSV dan PDF
@@ -16,12 +17,61 @@ Dokumentasi ini menjelaskan cara menjalankan aplikasi, role user, alur kerja, da
 
 - Python 3.11 atau lebih baru
 - Node.js 18 atau lebih baru
-- npm
+- pnpm 10 atau lebih baru
 - Webcam atau sumber RTSP jika ingin mencoba monitoring kamera
+
+Jika pnpm belum tersedia, aktifkan lewat Corepack:
+
+```powershell
+corepack enable
+```
+
+## Struktur Monorepo
+
+Project ini memakai pnpm workspace dari root repository.
+
+```text
+k3-monitoring/
+  backend/              FastAPI backend
+  frontend/             React + Vite frontend
+  package.json          Script monorepo
+  pnpm-workspace.yaml   Daftar workspace package
+  pnpm-lock.yaml        Lockfile pnpm
+```
+
+Workspace package:
+
+| Package | Path | Fungsi |
+| --- | --- | --- |
+| `k3-monitoring` | `.` | Script root untuk menjalankan app |
+| `k3-monitoring-backend` | `backend` | Script dev backend FastAPI |
+| `k3-monitoring-dashboard` | `frontend` | Frontend React + Vite |
+
+Install dependency frontend dari root:
+
+```powershell
+pnpm install
+```
+
+Jalankan frontend dan backend dari root:
+
+```powershell
+pnpm dev
+```
+
+Script root yang tersedia:
+
+```powershell
+pnpm dev
+pnpm dev:backend
+pnpm dev:frontend
+pnpm build
+pnpm preview
+```
 
 ## Cara Menjalankan Backend
 
-Buka terminal pertama:
+Backend tetap dapat dijalankan langsung dari folder `backend`.
 
 ```powershell
 cd backend
@@ -56,14 +106,31 @@ cd backend
 .\.venv\Scripts\Activate.ps1
 ```
 
+Jika dependency Python sudah terinstall, backend juga dapat dijalankan dari root lewat pnpm:
+
+```powershell
+pnpm dev:backend
+```
+
 ## Cara Menjalankan Frontend
 
-Buka terminal kedua:
+Frontend menggunakan Vite. Bukti konfigurasi:
+
+- `frontend/package.json` memakai script `vite`, `vite build`, dan `vite preview`
+- `frontend/vite.config.js` memakai `defineConfig` dari Vite dan plugin React
+- Entry HTML ada di `frontend/index.html`
+
+Jalankan dari root monorepo:
+
+```powershell
+pnpm dev:frontend
+```
+
+Atau dari folder frontend:
 
 ```powershell
 cd frontend
-npm install
-npm run dev
+pnpm dev
 ```
 
 Frontend biasanya berjalan di:
@@ -77,6 +144,31 @@ Frontend sudah diarahkan ke backend:
 ```text
 http://127.0.0.1:8000
 ```
+
+Konfigurasi base URL frontend memakai environment variable Vite:
+
+```text
+VITE_API_BASE_URL=http://127.0.0.1:8000
+```
+
+Jika variable ini tidak diset, frontend fallback ke `http://127.0.0.1:8000`.
+
+## Cara Menjalankan Dengan Docker Compose
+
+Docker Compose menjalankan backend dan frontend sekaligus.
+
+```powershell
+docker compose up --build
+```
+
+Service:
+
+| Service | URL | Catatan |
+| --- | --- | --- |
+| Backend | `http://127.0.0.1:8000` | FastAPI |
+| Frontend | `http://localhost:5173` | Vite dev server |
+
+Frontend container memakai pnpm melalui `frontend/Dockerfile`.
 
 ## Cara Menjalankan Simulator Kamera
 
@@ -113,6 +205,8 @@ Detail simulator:
 Catatan:
 
 - Role utama yang dipakai di sistem adalah Manager/Admin dan Staff/Operator.
+- Akun default dibuat otomatis saat backend startup melalui seed di `backend/auth.py`.
+- Seed hanya menambahkan user jika username belum ada, sehingga user lama tidak ditimpa.
 - Staff tidak langsung melakukan validasi final manager.
 - Manager hanya menerima kasus yang memang dikirim atau perlu eskalasi.
 
@@ -463,7 +557,7 @@ Sistem saat ini difokuskan pada dua jenis pengguna utama: manager/admin dan staf
 - `POST /violations/{id}/submit-report`
 - `POST /violations/{id}/validate`
 - `DELETE /violations/{id}`
-- `DELETE /violations/clear`
+- `DELETE /violations`
 
 ### Statistik dan Laporan
 
@@ -474,6 +568,7 @@ Sistem saat ini difokuskan pada dua jenis pengguna utama: manager/admin dan staf
 - `GET /stats/heatmap`
 - `GET /stats/cameras`
 - `GET /stats/kpi`
+- `GET /reports/export`
 - `GET /violations/export/csv`
 - `GET /violations/export/pdf`
 
@@ -490,6 +585,38 @@ cd backend
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 python main.py
+```
+
+Jika menjalankan backend lewat pnpm, pastikan virtual environment backend sudah dibuat dan dependency Python sudah terinstall lebih dulu.
+
+### pnpm dev gagal menjalankan backend
+
+Kemungkinan penyebab:
+
+- Virtual environment Python belum dibuat
+- Dependency backend belum terinstall
+- `uvicorn` belum tersedia di environment aktif
+
+Solusi:
+
+```powershell
+cd backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+cd ..
+pnpm dev:backend
+```
+
+### vite is not recognized
+
+Artinya dependency frontend belum terinstall dengan pnpm.
+
+Solusi:
+
+```powershell
+pnpm install
+pnpm dev:frontend
 ```
 
 ### Failed to fetch dari frontend

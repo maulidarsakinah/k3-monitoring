@@ -2,8 +2,10 @@ import sqlite3
 from fastapi import HTTPException
 from pydantic import BaseModel
 from typing import Optional
+from app.core.database import connect
+from app.core.config import settings
 
-DB_PATH = "violations.db"
+DB_PATH = settings.db_path
 
 
 class CameraCreate(BaseModel):
@@ -22,7 +24,7 @@ class CameraUpdate(BaseModel):
 
 
 def _get_conn():
-    return sqlite3.connect(DB_PATH)
+    return connect(DB_PATH)
 
 
 def init_camera_table():

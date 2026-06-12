@@ -1,0 +1,13 @@
+{
+  "name": "k3-monitoring",
+  "version": "1.0.0",
+  "private": true,
+  "packageManager": "pnpm@10.33.2",
+  "scripts": {
+    "dev": "pnpm -r --parallel --stream dev",
+    "dev:frontend": "pnpm --filter k3-monitoring-dashboard dev",
+    "dev:backend": "pnpm --filter k3-monitoring-backend dev",
+    "build": "pnpm --filter k3-monitoring-dashboard build",
+    "preview": "pnpm --filter k3-monitoring-dashboard preview"
+  }
+}

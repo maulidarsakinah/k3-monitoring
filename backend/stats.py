@@ -1,12 +1,14 @@
 import json
 import sqlite3
 from datetime import datetime, timedelta
+from app.core.database import connect
+from app.core.config import settings
 
-DB_PATH = "violations.db"
+DB_PATH = settings.db_path
 
 
 def _get_conn():
-    return sqlite3.connect(DB_PATH)
+    return connect(DB_PATH)
 
 
 def _build_date_filter(start_date=None, end_date=None, date_range=None):

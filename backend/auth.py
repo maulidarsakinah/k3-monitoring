@@ -5,6 +5,8 @@ from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 import sqlite3
+from app.core.database import connect
+from app.core.config import settings
 
 SECRET_KEY = "apd-k3-secret-key-ganti-ini-di-production"
 ALGORITHM = "HS256"
@@ -13,7 +15,7 @@ ACCESS_TOKEN_EXPIRE_HOURS = 24
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
-DB_PATH = "violations.db"
+DB_PATH = settings.db_path
 
 # ── Role hierarchy ─────────────────────────────────────────────────────────────
 # admin          → akun admin/manager utama
@@ -97,7 +99,7 @@ require_all        = require_role(*VALID_ROLES)  # semua role login boleh
 
 
 def _get_conn():
-    return sqlite3.connect(DB_PATH)
+    return connect(DB_PATH)
 
 
 def init_user_table():

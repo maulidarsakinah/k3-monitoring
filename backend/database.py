@@ -3,9 +3,11 @@ import json
 import logging
 from datetime import datetime, timedelta
 from models import DetectionResult
+from app.core.database import connect
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
-DB_PATH = "violations.db"
+DB_PATH = settings.db_path
 INCIDENT_WINDOW_MINUTES = 5
 AUTO_REVIEW_CONFIDENCE_THRESHOLD = 0.9
 
@@ -35,7 +37,7 @@ class ViolationDatabase:
         self._init_db()
 
     def _get_conn(self):
-        return sqlite3.connect(self.db_path)
+        return connect(self.db_path)
 
     def _init_db(self):
         with self._get_conn() as conn:
@@ -83,6 +85,9 @@ class ViolationDatabase:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_status ON violations (status)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_severity ON violations (severity)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_incident_key ON violations (incident_key)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_violations_timestamp_camera ON violations (timestamp, camera_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_violations_status_timestamp ON violations (status, timestamp)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_violations_severity_timestamp ON violations (severity, timestamp)")
             conn.commit()
 
     def log_violation(self, result: DetectionResult, evidence_path: str = None):
@@ -322,25 +327,20 @@ class ViolationDatabase:
             today_count = conn.execute(
                 "SELECT COUNT(*) FROM violations WHERE timestamp LIKE ?", (f"{today}%",)
             ).fetchone()[0]
-            detected = conn.execute(
-                f"SELECT COUNT(*) FROM violations{where} AND status IN ('detected', 'pending')", params_filter
-            ).fetchone()[0]
-            needs_manager = conn.execute(
-                f"SELECT COUNT(*) FROM violations{where} AND status='needs_manager'", params_filter
-            ).fetchone()[0]
-            staff_reviewed = conn.execute(
-                f"SELECT COUNT(*) FROM violations{where} AND status='staff_reviewed'", params_filter
-            ).fetchone()[0]
-            approved = conn.execute(
-                f"SELECT COUNT(*) FROM violations{where} AND status='approved'", params_filter
-            ).fetchone()[0]
-            rejected = conn.execute(
-                f"SELECT COUNT(*) FROM violations{where} AND status='rejected'", params_filter
-            ).fetchone()[0]
+            status_rows = conn.execute(
+                f"SELECT status, COUNT(*) FROM violations{where} GROUP BY status", params_filter
+            ).fetchall()
             severity_rows = conn.execute(
                 f"SELECT severity, COUNT(*) FROM violations{where} GROUP BY severity", params_filter
             ).fetchall()
             rows = conn.execute(f"SELECT violations FROM violations{where}", params_filter).fetchall()
+
+        status_counts = {row[0] or "pending": row[1] for row in status_rows}
+        detected = status_counts.get("detected", 0) + status_counts.get("pending", 0)
+        needs_manager = status_counts.get("needs_manager", 0)
+        staff_reviewed = status_counts.get("staff_reviewed", 0)
+        approved = status_counts.get("approved", 0)
+        rejected = status_counts.get("rejected", 0)
 
         violation_counts: dict[str, int] = {}
         for (v_json,) in rows:

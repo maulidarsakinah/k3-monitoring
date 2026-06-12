@@ -1,12 +1,18 @@
 FROM node:20-alpine
 
-WORKDIR /app
+WORKDIR /workspace
 
-COPY package*.json ./
-RUN npm install
+RUN corepack enable
 
-COPY . .
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* ./
+COPY frontend/package.json frontend/package.json
+COPY backend/package.json backend/package.json
+RUN pnpm install --filter k3-monitoring-dashboard --frozen-lockfile=false
+
+COPY frontend frontend
+
+WORKDIR /workspace/frontend
 
 EXPOSE 5173
 
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+CMD ["pnpm", "dev", "--", "--host", "0.0.0.0"]
