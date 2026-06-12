@@ -90,10 +90,16 @@ cd backend
 python simulate_camera.py
 ```
 
+### Perintah Run Dummy Video
+
+python simulate_camera.py --source sample-k3.mp4 --loop
+
 Detail simulator:
 
 - Mengirim frame ke `ws://localhost:8000/ws/camera/cam_test`
 - Tekan `q` atau `Esc` untuk menutup jendela simulator
+
+
 
 ## Urutan Menjalankan Aplikasi
 

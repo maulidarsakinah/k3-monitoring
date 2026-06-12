@@ -1,4 +1,5 @@
 # simulate_camera.py - test stream backend tanpa frontend.
+import argparse
 import asyncio
 import base64
 import json
@@ -7,8 +8,8 @@ import cv2
 import numpy as np
 import websockets
 
-WS_URL = "ws://localhost:8000/ws/camera/cam_test"
-CAMERA_INDEX = 0
+DEFAULT_WS_URL = "ws://localhost:8000/ws/camera/cam_test"
+DEFAULT_CAMERA_INDEX = 0
 TARGET_FPS = 60
 FRAME_INTERVAL_SEC = 1.0 / TARGET_FPS
 RECV_TIMEOUT_SEC = 0.001
@@ -158,14 +159,52 @@ def compose_frame_with_sidebar(frame, summary, has_violation, detections,
     return canvas
 
 
-async def simulate() -> None:
-    cap = cv2.VideoCapture(CAMERA_INDEX)
-    if not cap.isOpened():
-        raise RuntimeError(f"Gagal membuka kamera index {CAMERA_INDEX}. Coba ganti ke 1 atau 2.")
-    cap.set(cv2.CAP_PROP_FPS, TARGET_FPS)
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Simulasi kamera APD dari webcam, file video lokal, atau URL video."
+    )
+    parser.add_argument(
+        "--source",
+        default=str(DEFAULT_CAMERA_INDEX),
+        help="Sumber video. Contoh: 0 untuk webcam, sample.mp4, atau URL video.",
+    )
+    parser.add_argument(
+        "--ws-url",
+        default=DEFAULT_WS_URL,
+        help="URL WebSocket backend. Default: ws://localhost:8000/ws/camera/cam_test",
+    )
+    parser.add_argument(
+        "--loop",
+        action="store_true",
+        help="Putar ulang video dari awal saat file video selesai.",
+    )
+    parser.add_argument(
+        "--no-preview",
+        action="store_true",
+        help="Kirim frame tanpa membuka window preview OpenCV.",
+    )
+    return parser.parse_args()
 
-    cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
-    cv2.resizeWindow(WINDOW_NAME, 1320, 620)
+
+def open_capture(source: str):
+    capture_source = int(source) if source.isdigit() else source
+    cap = cv2.VideoCapture(capture_source)
+    if not cap.isOpened():
+        raise RuntimeError(
+            f"Gagal membuka sumber video '{source}'. "
+            "Pakai angka webcam seperti 0/1, path file .mp4, atau URL video yang bisa dibaca OpenCV."
+        )
+    cap.set(cv2.CAP_PROP_FPS, TARGET_FPS)
+    return cap
+
+
+async def simulate() -> None:
+    args = parse_args()
+    cap = open_capture(args.source)
+
+    if not args.no_preview:
+        cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(WINDOW_NAME, 1320, 620)
 
     # State deteksi — dipertahankan saat reconnect
     summary = "Menunggu hasil deteksi..."
@@ -177,22 +216,25 @@ async def simulate() -> None:
     try:
         while True:  # loop reconnect
             try:
-                print(f"Menghubungkan ke {WS_URL}...")
+                print(f"Menghubungkan ke {args.ws_url}...")
                 async with websockets.connect(
-                    WS_URL,
+                    args.ws_url,
                     ping_interval=None,
                     ping_timeout=None,
                     close_timeout=10,
                 ) as ws:
-                    print(f"Terhubung! | target FPS: {TARGET_FPS}")
+                    print(f"Terhubung! | source: {args.source} | target FPS: {TARGET_FPS}")
                     loop = asyncio.get_running_loop()
 
                     while True:
                         frame_start = loop.time()
                         ret, frame = cap.read()
                         if not ret:
-                            print("Frame kamera gagal dibaca.")
-                            break
+                            if args.loop:
+                                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                                continue
+                            print("Video selesai atau frame gagal dibaca.")
+                            return
 
                         ok, buf = cv2.imencode(".jpg", frame)
                         if not ok:
@@ -224,20 +266,21 @@ async def simulate() -> None:
                         except asyncio.TimeoutError:
                             pass
 
-                        preview = frame.copy()
-                        draw_overlay(preview, summary, has_violation)
-                        checklist = build_attribute_checklist(latest_detections)
-                        combined = compose_frame_with_sidebar(
-                            preview, summary=summary, has_violation=has_violation,
-                            detections=latest_detections, checklist=checklist,
-                            severity=severity, logged=logged,
-                        )
-                        cv2.imshow(WINDOW_NAME, combined)
+                        if not args.no_preview:
+                            preview = frame.copy()
+                            draw_overlay(preview, summary, has_violation)
+                            checklist = build_attribute_checklist(latest_detections)
+                            combined = compose_frame_with_sidebar(
+                                preview, summary=summary, has_violation=has_violation,
+                                detections=latest_detections, checklist=checklist,
+                                severity=severity, logged=logged,
+                            )
+                            cv2.imshow(WINDOW_NAME, combined)
 
-                        key = cv2.waitKey(1) & 0xFF
-                        if key in (ord("q"), 27):
-                            print("Keluar dari simulator kamera.")
-                            return  # keluar total
+                            key = cv2.waitKey(1) & 0xFF
+                            if key in (ord("q"), 27):
+                                print("Keluar dari simulator kamera.")
+                                return  # keluar total
 
                         elapsed = loop.time() - frame_start
                         sleep_time = FRAME_INTERVAL_SEC - elapsed
