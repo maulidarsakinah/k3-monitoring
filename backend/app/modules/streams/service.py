@@ -23,6 +23,9 @@ logger = logging.getLogger(__name__)
 
 VIEWER_IMAGE_MAX_WIDTH = int(os.getenv("VIEWER_IMAGE_MAX_WIDTH", "960"))
 VIEWER_IMAGE_JPEG_QUALITY = int(os.getenv("VIEWER_IMAGE_JPEG_QUALITY", "82"))
+VIEWER_PREVIEW_INTERVAL_SECONDS = float(
+    os.getenv("VIEWER_PREVIEW_INTERVAL_SECONDS", "0.12"))
+MAX_CAMERA_PAYLOAD_KB = int(os.getenv("MAX_CAMERA_PAYLOAD_KB", "4096"))
 LATEST_PAYLOAD_TTL_SECONDS = float(
     os.getenv("LATEST_PAYLOAD_TTL_SECONDS", "30"))
 RTSP_MAX_READ_FAILURES = int(os.getenv("RTSP_MAX_READ_FAILURES", "20"))
@@ -76,7 +79,7 @@ class StreamService:
         if elapsed < 5.0:
             return
         logger.info(
-            "[%s] recv=%d (%.1f/s) proc=%d (%.1f/s) sent=%d (%.1f/s) dropped=%d",
+            "[%s] recv=%d (%.1f/s) proc=%d (%.1f/s) det_sent=%d (%.1f/s) preview_sent=%d (%.1f/s) dropped=%d infer_avg=%.0fms process_avg=%.0fms payload_avg=%.0fKB viewers=%d",
             camera_id,
             stats["received"],
             stats["received"] / elapsed,
@@ -84,13 +87,46 @@ class StreamService:
             stats["processed"] / elapsed,
             stats["sent"],
             stats["sent"] / elapsed,
+            stats["preview_sent"],
+            stats["preview_sent"] / elapsed,
             stats["dropped"],
+            stats["inference_ms_total"] / max(1, stats["processed"]),
+            stats["processing_ms_total"] / max(1, stats["processed"]),
+            stats["payload_kb_total"] / max(1, stats["sent"] + stats["preview_sent"]),
+            self.manager.viewer_count(camera_id),
         )
         stats["received"] = 0
         stats["processed"] = 0
         stats["sent"] = 0
+        stats["preview_sent"] = 0
         stats["dropped"] = 0
+        stats["inference_ms_total"] = 0.0
+        stats["processing_ms_total"] = 0.0
+        stats["payload_kb_total"] = 0.0
         stats["last_log"] = now
+
+    async def _decode_camera_image(self, image_base64: str, camera_id: str) -> bytes:
+        encoded_size_kb = len(image_base64) / 1024
+        if encoded_size_kb > MAX_CAMERA_PAYLOAD_KB:
+            raise ValueError(
+                f"Frame terlalu besar ({encoded_size_kb:.0f}KB > {MAX_CAMERA_PAYLOAD_KB}KB)"
+            )
+        return await asyncio.to_thread(base64.b64decode, image_base64)
+
+    def _payload_size_kb(self, payload: dict) -> float:
+        try:
+            return len(json.dumps(payload, separators=(",", ":")).encode("utf-8")) / 1024
+        except Exception:
+            image = payload.get("image") or ""
+            return len(image) / 1024
+
+    async def _preview_payload(self, image_bytes: bytes, camera_id: str) -> dict:
+        return {
+            "type": "preview",
+            "camera_id": camera_id,
+            "timestamp": datetime.now().isoformat(),
+            "image": await self._viewer_image_base64(image_bytes),
+        }
 
     def _is_latest_payload_fresh(self, camera_id: str) -> bool:
         seen_at = self.latest_payload_seen_at.get(camera_id)
@@ -407,11 +443,15 @@ class StreamService:
         if not self.should_process_frame(camera_id, throttle_interval):
             return None
 
+        loop = asyncio.get_running_loop()
+        processing_started_at = loop.time()
+        inference_started_at = loop.time()
         detected_result = await self.detection_service.detect_bytes(
             image_bytes,
             camera_id,
             apply_rules=False,
         )
+        inference_ms = (loop.time() - inference_started_at) * 1000
         raw_result, active_rule = self.apply_camera_rule(detected_result)
         result, stability = self.stabilize_result(
             raw_result,
@@ -445,9 +485,13 @@ class StreamService:
         if include_image:
             payload["image"] = await self._viewer_image_base64(image_bytes)
 
+        payload["server_timing"] = {
+            "inference_ms": round(inference_ms, 1),
+            "processing_ms": round((loop.time() - processing_started_at) * 1000, 1),
+        }
+
         self.latest_payloads[camera_id] = payload
-        self.latest_payload_seen_at[camera_id] = asyncio.get_running_loop(
-        ).time()
+        self.latest_payload_seen_at[camera_id] = loop.time()
         return payload
 
     async def rtsp_camera_loop(self, camera: dict):
@@ -650,13 +694,54 @@ class StreamService:
             "received": 0,
             "processed": 0,
             "sent": 0,
+            "preview_sent": 0,
             "dropped": 0,
+            "inference_ms_total": 0.0,
+            "processing_ms_total": 0.0,
+            "payload_kb_total": 0.0,
             "last_log": loop.time(),
         }
         latest: dict = {"bytes": None, "include_image": True}
+        latest_preview: dict = {"bytes": None}
         frame_ready = asyncio.Event()
+        preview_ready = asyncio.Event()
         shutdown = False
         throttle_interval = settings.websocket_detection_interval_seconds
+
+        async def preview_loop():
+            last_preview_at = 0.0
+            min_interval = max(0.04, VIEWER_PREVIEW_INTERVAL_SECONDS)
+            while not shutdown:
+                await preview_ready.wait()
+                preview_ready.clear()
+                while not shutdown:
+                    if self.manager.viewer_count(camera_id) <= 0:
+                        latest_preview["bytes"] = None
+                        break
+
+                    now = loop.time()
+                    wait_seconds = min_interval - (now - last_preview_at)
+                    if wait_seconds > 0:
+                        await asyncio.sleep(wait_seconds)
+
+                    image_bytes = latest_preview["bytes"]
+                    if image_bytes is None:
+                        break
+                    latest_preview["bytes"] = None
+
+                    try:
+                        payload = await self._preview_payload(image_bytes, camera_id)
+                        await self.manager.broadcast_to_viewers(camera_id, payload)
+                        last_preview_at = loop.time()
+                        stats["preview_sent"] += 1
+                        stats["payload_kb_total"] += self._payload_size_kb(payload)
+                    except Exception as exc:
+                        logger.warning(
+                            "Preview frame send error [%s]: %s", camera_id, exc)
+
+                    if latest_preview["bytes"] is not None:
+                        continue
+                    break
 
         async def process_loop():
             while not shutdown:
@@ -678,15 +763,22 @@ class StreamService:
                             continue
                         break
 
-                    stats["processed"] += 1
                     try:
+                        started_at = loop.time()
                         payload = await self.process_frame_bytes(
                             image_bytes,
                             camera_id,
                             throttle_interval=None,
-                            include_image=include_image,
+                            include_image=False,
                         )
                         if payload:
+                            stats["processed"] += 1
+                            timing = payload.get("server_timing") or {}
+                            stats["inference_ms_total"] += float(timing.get("inference_ms") or 0)
+                            stats["processing_ms_total"] += float(
+                                timing.get("processing_ms") or ((loop.time() - started_at) * 1000)
+                            )
+                            stats["payload_kb_total"] += self._payload_size_kb(payload)
                             await self._send_camera_detection_ack(
                                 websocket, payload, camera_id)
                             await self.manager.broadcast_to_viewers(camera_id, payload)
@@ -700,6 +792,7 @@ class StreamService:
                     break
 
         processor_task = asyncio.create_task(process_loop())
+        preview_task = asyncio.create_task(preview_loop())
 
         try:
             while True:
@@ -720,7 +813,8 @@ class StreamService:
                     try:
                         payload = json.loads(data["text"])
                         if "image" in payload:
-                            image_bytes = base64.b64decode(payload["image"])
+                            image_bytes = await self._decode_camera_image(
+                                payload["image"], camera_id)
                         include_image = bool(payload.get("include_image", True))
                     except Exception as exc:
                         logger.warning(
@@ -739,6 +833,11 @@ class StreamService:
                     latest["bytes"] = image_bytes
                     latest["include_image"] = include_image
                     frame_ready.set()
+                    if include_image:
+                        if latest_preview["bytes"] is not None:
+                            stats["dropped"] += 1
+                        latest_preview["bytes"] = image_bytes
+                        preview_ready.set()
 
                 self._log_ws_camera_stats(camera_id, stats)
 
@@ -754,8 +853,10 @@ class StreamService:
         finally:
             shutdown = True
             frame_ready.set()
+            preview_ready.set()
             processor_task.cancel()
-            await asyncio.gather(processor_task, return_exceptions=True)
+            preview_task.cancel()
+            await asyncio.gather(processor_task, preview_task, return_exceptions=True)
             self._log_ws_camera_stats(camera_id, stats)
 
     async def websocket_viewer(self, websocket: WebSocket, camera_id: str):

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import json
 
 from fastapi import WebSocket
 
@@ -42,15 +43,25 @@ class ConnectionManager:
         if not viewers:
             self.viewer_connections.pop(camera_id, None)
 
-    async def broadcast_to_viewers(self, camera_id: str, payload: dict):
+    def viewer_count(self, camera_id: str) -> int:
+        return len(self.viewer_connections.get(camera_id, set()))
+
+    async def broadcast_to_viewers(self, camera_id: str, payload: dict, timeout: float = 0.75):
         viewers = list(self.viewer_connections.get(camera_id, set()))
         if not viewers:
             return
 
+        try:
+            message = json.dumps(payload, separators=(",", ":"))
+        except Exception:
+            logger.exception("Failed to serialize viewer payload [%s]", camera_id)
+            return
+
         async def send(viewer: WebSocket):
             try:
-                await viewer.send_json(payload)
-            except Exception:
+                await asyncio.wait_for(viewer.send_text(message), timeout=timeout)
+            except Exception as exc:
+                logger.warning("Viewer send failed [%s]: %s", camera_id, exc)
                 self.disconnect_viewer(viewer, camera_id)
 
         await asyncio.gather(*(send(viewer) for viewer in viewers))

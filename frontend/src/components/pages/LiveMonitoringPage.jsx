@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -48,6 +48,7 @@ const manualCameraOptions = [
 ];
 
 const STALE_FRAME_MS = 25000;
+const OVERLAY_HOLD_MS = 2200;
 const VIEWER_RECONNECT_BASE_MS = 1500;
 const VIEWER_RECONNECT_MAX_MS = 12000;
 
@@ -99,10 +100,14 @@ function boxStyle(detection) {
   };
 }
 
-function DetectionOverlay({ detections = [], imageSize }) {
-  const visibleDetections = detections.filter((detection) =>
+function visibleOverlayDetections(detections = []) {
+  return detections.filter((detection) =>
     ALLOWED_BOX_CLASSES.has(String(detection.class_name || "").toLowerCase()),
   );
+}
+
+function DetectionOverlay({ detections = [], imageSize }) {
+  const visibleDetections = visibleOverlayDetections(detections);
 
   if (!imageSize.width || !imageSize.height || visibleDetections.length === 0) {
     return null;
@@ -178,12 +183,15 @@ export default function LiveMonitoringPage({
 }) {
   const [selectedCamera, setSelectedCamera] = useState("cam_test");
   const [liveDetection, setLiveDetection] = useState(null);
-  const [liveImage, setLiveImage] = useState("");
-  const [lastFrameAt, setLastFrameAt] = useState(0);
+  const [hasLiveImage, setHasLiveImage] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [streamMessage, setStreamMessage] = useState("");
   const [connectionState, setConnectionState] = useState("connecting");
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
+  const [overlayDetections, setOverlayDetections] = useState([]);
+  const imageRef = useRef(null);
+  const lastFrameAtRef = useRef(0);
+  const overlayLastSeenAtRef = useRef(0);
 
   const latest = latestViolations[0];
 
@@ -274,8 +282,13 @@ export default function LiveMonitoringPage({
 
       if (pendingFrame.clearImage) {
         setLiveDetection(null);
-        setLiveImage("");
-        setLastFrameAt(0);
+        setOverlayDetections([]);
+        overlayLastSeenAtRef.current = 0;
+        if (imageRef.current) {
+          imageRef.current.removeAttribute("src");
+        }
+        setHasLiveImage(false);
+        lastFrameAtRef.current = 0;
         setImageSize({ width: 0, height: 0 });
         pendingFrame.clearImage = false;
       }
@@ -287,13 +300,23 @@ export default function LiveMonitoringPage({
 
       if (pendingFrame.detection) {
         setLiveDetection(pendingFrame.detection);
+        const nextOverlayDetections = visibleOverlayDetections(
+          pendingFrame.detection.detections || [],
+        );
+        if (nextOverlayDetections.length > 0) {
+          setOverlayDetections(nextOverlayDetections);
+          overlayLastSeenAtRef.current = Date.now();
+        }
         setStreamMessage("");
-        setLastFrameAt(Date.now());
-        renderedFrames += 1;
       }
 
       if (pendingFrame.image) {
-        setLiveImage(pendingFrame.image);
+        if (imageRef.current) {
+          imageRef.current.src = `data:image/jpeg;base64,${pendingFrame.image}`;
+        }
+        lastFrameAtRef.current = Date.now();
+        setHasLiveImage(true);
+        renderedFrames += 1;
       }
 
       pendingFrame.detection = null;
@@ -349,7 +372,8 @@ export default function LiveMonitoringPage({
         if (disposed) {
           return;
         }
-        setConnectionState("closed");
+        socket = null;
+        setConnectionState("reconnecting");
         console.warn(
           `[viewer:${selectedCamera}] closed code=${event.code} reason=${event.reason || "none"}`,
         );
@@ -396,6 +420,15 @@ export default function LiveMonitoringPage({
             scheduleFrameFlush();
             logViewerStats();
           }
+
+          if (payload.type === "preview") {
+            receivedFrames += 1;
+            if (payload.image) {
+              pendingFrame.image = payload.image;
+              scheduleFrameFlush();
+            }
+            logViewerStats();
+          }
         } catch (error) {
           console.error("Gagal membaca payload viewer", error);
         }
@@ -403,8 +436,13 @@ export default function LiveMonitoringPage({
     };
 
     setLiveDetection(null);
-    setLiveImage("");
-    setLastFrameAt(0);
+    setOverlayDetections([]);
+    overlayLastSeenAtRef.current = 0;
+    if (imageRef.current) {
+      imageRef.current.removeAttribute("src");
+    }
+    setHasLiveImage(false);
+    lastFrameAtRef.current = 0;
     setStreamMessage("");
     setImageSize({ width: 0, height: 0 });
     connectViewer();
@@ -416,6 +454,9 @@ export default function LiveMonitoringPage({
       }
       if (rafId !== null) {
         window.cancelAnimationFrame(rafId);
+      }
+      if (imageRef.current) {
+        imageRef.current.removeAttribute("src");
       }
       if (socket) {
         socket.onopen = null;
@@ -440,19 +481,30 @@ export default function LiveMonitoringPage({
     return () => window.clearInterval(intervalId);
   }, []);
 
-  const isFrameStale = lastFrameAt > 0 && now - lastFrameAt > STALE_FRAME_MS;
+  useEffect(() => {
+    if (overlayDetections.length === 0) return;
+    if (now - overlayLastSeenAtRef.current <= OVERLAY_HOLD_MS) return;
+    setOverlayDetections([]);
+  }, [now, overlayDetections.length]);
+
+  const isFrameStale =
+    lastFrameAtRef.current > 0 && now - lastFrameAtRef.current > STALE_FRAME_MS;
 
   useEffect(() => {
     if (!isFrameStale) return;
     setLiveDetection(null);
-    setLiveImage("");
+    setOverlayDetections([]);
+    overlayLastSeenAtRef.current = 0;
+    if (imageRef.current) {
+      imageRef.current.removeAttribute("src");
+    }
+    setHasLiveImage(false);
+    lastFrameAtRef.current = 0;
     setImageSize({ width: 0, height: 0 });
     setStreamMessage("Stream tidak menerima frame baru");
   }, [isFrameStale]);
 
-  const currentImage = isFrameStale ? "" : liveImage;
-
-  const imageSrc = currentImage ? `data:image/jpeg;base64,${currentImage}` : "";
+  const currentImage = !isFrameStale && hasLiveImage;
 
   const activeViolation = Boolean(currentImage && liveDetection?.has_violation);
 
@@ -514,6 +566,8 @@ export default function LiveMonitoringPage({
                 ? "Live Monitoring"
                 : connectionState === "error"
                   ? "Koneksi Error"
+                  : connectionState === "reconnecting"
+                    ? "Menghubungkan Ulang"
                   : "Menghubungkan"}
             </div>
 
@@ -562,26 +616,28 @@ export default function LiveMonitoringPage({
 
         <div className="mt-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2 min-h-72 rounded-xl bg-black/35 border border-white/10 flex items-center justify-center relative overflow-hidden">
-            {imageSrc ? (
-              <>
-                <img
-                  src={imageSrc}
-                  alt={`Live camera ${selectedCamera}`}
-                  className="w-full h-full max-h-[520px] object-contain"
-                  onLoad={(event) => {
-                    setImageSize({
-                      width: event.currentTarget.naturalWidth,
-                      height: event.currentTarget.naturalHeight,
-                    });
-                  }}
-                />
+            <img
+              ref={imageRef}
+              alt={`Live camera ${selectedCamera}`}
+              className={`w-full h-full max-h-[520px] object-contain ${
+                currentImage ? "block" : "hidden"
+              }`}
+              onLoad={(event) => {
+                setImageSize({
+                  width: event.currentTarget.naturalWidth,
+                  height: event.currentTarget.naturalHeight,
+                });
+              }}
+            />
 
-                <DetectionOverlay
-                  detections={liveDetection?.detections || []}
-                  imageSize={imageSize}
-                />
-              </>
-            ) : (
+            {currentImage && (
+              <DetectionOverlay
+                detections={overlayDetections}
+                imageSize={imageSize}
+              />
+            )}
+
+            {!currentImage && (
               <div className="text-center text-white/40 px-6">
                 <Camera size={54} className="mx-auto text-white/20 mb-3" />
                 <p className="text-sm font-semibold">Menunggu frame deteksi</p>

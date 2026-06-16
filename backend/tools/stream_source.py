@@ -162,8 +162,8 @@ def main():
     parser.add_argument(
         "--fps",
         type=float,
-        default=2.0,
-        help="FPS pengiriman frame ke backend. Default: 2 FPS.",
+        default=8.0,
+        help="FPS pengiriman frame preview ke backend. Default: 8 FPS; deteksi AI tetap di-throttle backend.",
     )
 
     parser.add_argument(
