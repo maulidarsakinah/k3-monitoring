@@ -96,6 +96,21 @@ REPORTABLE_COMPLIANCE_CLASSES = {
     ).split(",")
     if name.strip()
 }
+DISPLAY_ALLOWED_CLASSES = {
+    "person",
+    "helmet",
+    "no-helmet",
+    "vest",
+    "no-vest",
+    "gloves",
+    "no-gloves",
+    "goggles",
+    "no-goggles",
+    "boots",
+    "no-boots",
+    "safety-shoes",
+    "no-safety-shoes",
+}
 
 CLASS_CONFIDENCE_THRESHOLDS = {
     "person": 0.18,
@@ -275,6 +290,8 @@ class APDDetector:
             cls_id = int(box.cls[0])
             raw_cls_name = self.model.names[cls_id]
             cls_name = normalize_class_name(raw_cls_name)
+            if cls_name not in DISPLAY_ALLOWED_CLASSES:
+                continue
             min_conf = DISPLAY_CONFIDENCE_THRESHOLDS.get(
                 cls_name, DEFAULT_CONFIDENCE_THRESHOLD)
             if conf < min_conf:
@@ -365,25 +382,28 @@ class APDDetector:
         return filtered
 
     def _filter_display_detections(self, detections: list[Detection]) -> list[Detection]:
-        if not HIDE_UNRELIABLE_COMPLIANCE:
-            return detections
-
         display: list[Detection] = []
-        hidden_classes = []
+        hidden_classes: list[str] = []
         for det in detections:
-            is_apd_compliance = (
-                not det.is_violation
-                and not is_negative_class(det.class_name)
-                and det.category not in ("person", "unknown", "objek", "context")
-            )
-            if is_apd_compliance and det.class_name not in REPORTABLE_COMPLIANCE_CLASSES:
+            if det.class_name not in DISPLAY_ALLOWED_CLASSES:
                 hidden_classes.append(det.class_name)
                 continue
+
+            if HIDE_UNRELIABLE_COMPLIANCE:
+                is_apd_compliance = (
+                    not det.is_violation
+                    and not is_negative_class(det.class_name)
+                    and det.category not in ("person", "unknown", "objek", "context")
+                )
+                if is_apd_compliance and det.class_name not in REPORTABLE_COMPLIANCE_CLASSES:
+                    hidden_classes.append(det.class_name)
+                    continue
+
             display.append(det)
 
         if hidden_classes:
-            logger.info(
-                "Hiding unreliable compliance classes from UI: %s",
+            logger.debug(
+                "Hiding non-display classes from UI: %s",
                 sorted(set(hidden_classes)),
             )
         return display

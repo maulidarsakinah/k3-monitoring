@@ -48,6 +48,24 @@ const manualCameraOptions = [
 ];
 
 const STALE_FRAME_MS = 25000;
+const VIEWER_RECONNECT_BASE_MS = 1500;
+const VIEWER_RECONNECT_MAX_MS = 12000;
+
+const ALLOWED_BOX_CLASSES = new Set([
+  "person",
+  "helmet",
+  "no-helmet",
+  "vest",
+  "no-vest",
+  "gloves",
+  "no-gloves",
+  "goggles",
+  "no-goggles",
+  "boots",
+  "no-boots",
+  "safety-shoes",
+  "no-safety-shoes",
+]);
 
 function boxStyle(detection) {
   if (detection.is_violation) {
@@ -82,7 +100,11 @@ function boxStyle(detection) {
 }
 
 function DetectionOverlay({ detections = [], imageSize }) {
-  if (!imageSize.width || !imageSize.height || detections.length === 0) {
+  const visibleDetections = detections.filter((detection) =>
+    ALLOWED_BOX_CLASSES.has(String(detection.class_name || "").toLowerCase()),
+  );
+
+  if (!imageSize.width || !imageSize.height || visibleDetections.length === 0) {
     return null;
   }
 
@@ -94,7 +116,7 @@ function DetectionOverlay({ detections = [], imageSize }) {
       viewBox={`0 0 ${imageSize.width} ${imageSize.height}`}
       preserveAspectRatio="xMidYMid meet"
     >
-      {detections.map((detection, index) => {
+      {visibleDetections.map((detection, index) => {
         const [x1, y1, x2, y2] = detection.bbox || [];
 
         if ([x1, y1, x2, y2].some((value) => typeof value !== "number")) {
@@ -228,51 +250,186 @@ export default function LiveMonitoringPage({
   const selectedStreamStatus = streamStatusByName[selectedCamera];
 
   useEffect(() => {
-    setConnectionState("connecting");
+    let disposed = false;
+    let socket = null;
+    let reconnectTimer = null;
+    let rafId = null;
+    let reconnectAttempt = 0;
+    let receivedFrames = 0;
+    let renderedFrames = 0;
+    let lastFpsLogAt = Date.now();
+
+    const pendingFrame = {
+      detection: null,
+      image: null,
+      streamMessage: null,
+      clearImage: false,
+    };
+
+    const flushPendingFrame = () => {
+      rafId = null;
+      if (disposed) {
+        return;
+      }
+
+      if (pendingFrame.clearImage) {
+        setLiveDetection(null);
+        setLiveImage("");
+        setLastFrameAt(0);
+        setImageSize({ width: 0, height: 0 });
+        pendingFrame.clearImage = false;
+      }
+
+      if (pendingFrame.streamMessage !== null) {
+        setStreamMessage(pendingFrame.streamMessage);
+        pendingFrame.streamMessage = null;
+      }
+
+      if (pendingFrame.detection) {
+        setLiveDetection(pendingFrame.detection);
+        setStreamMessage("");
+        setLastFrameAt(Date.now());
+        renderedFrames += 1;
+      }
+
+      if (pendingFrame.image) {
+        setLiveImage(pendingFrame.image);
+      }
+
+      pendingFrame.detection = null;
+      pendingFrame.image = null;
+    };
+
+    const scheduleFrameFlush = () => {
+      if (rafId !== null) {
+        return;
+      }
+      rafId = window.requestAnimationFrame(flushPendingFrame);
+    };
+
+    const logViewerStats = () => {
+      const now = Date.now();
+      const elapsed = (now - lastFpsLogAt) / 1000;
+      if (elapsed < 5) {
+        return;
+      }
+      console.info(
+        `[viewer:${selectedCamera}] recv=${receivedFrames} (${(receivedFrames / elapsed).toFixed(1)}/s) render=${renderedFrames} (${(renderedFrames / elapsed).toFixed(1)}/s)`,
+      );
+      receivedFrames = 0;
+      renderedFrames = 0;
+      lastFpsLogAt = now;
+    };
+
+    const connectViewer = () => {
+      if (disposed) {
+        return;
+      }
+
+      if (
+        socket &&
+        (socket.readyState === WebSocket.OPEN ||
+          socket.readyState === WebSocket.CONNECTING)
+      ) {
+        return;
+      }
+
+      setConnectionState("connecting");
+      socket = createViewerSocket(selectedCamera);
+
+      socket.onopen = () => {
+        if (disposed) {
+          return;
+        }
+        reconnectAttempt = 0;
+        setConnectionState("connected");
+      };
+
+      socket.onclose = (event) => {
+        if (disposed) {
+          return;
+        }
+        setConnectionState("closed");
+        console.warn(
+          `[viewer:${selectedCamera}] closed code=${event.code} reason=${event.reason || "none"}`,
+        );
+        const delay = Math.min(
+          VIEWER_RECONNECT_BASE_MS * 2 ** reconnectAttempt,
+          VIEWER_RECONNECT_MAX_MS,
+        );
+        reconnectAttempt += 1;
+        reconnectTimer = window.setTimeout(connectViewer, delay);
+      };
+
+      socket.onerror = () => {
+        if (disposed) {
+          return;
+        }
+        setConnectionState("error");
+        console.warn(`[viewer:${selectedCamera}] websocket error`);
+      };
+
+      socket.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+
+          if (payload.type === "ping") {
+            return;
+          }
+
+          if (payload.type === "status") {
+            pendingFrame.streamMessage = payload.message || "";
+            if (payload.clear_image === true) {
+              pendingFrame.clearImage = true;
+            }
+            scheduleFrameFlush();
+            return;
+          }
+
+          if (payload.type === "detection") {
+            receivedFrames += 1;
+            const { image, ...detectionPayload } = payload;
+            pendingFrame.detection = detectionPayload;
+            if (image) {
+              pendingFrame.image = image;
+            }
+            scheduleFrameFlush();
+            logViewerStats();
+          }
+        } catch (error) {
+          console.error("Gagal membaca payload viewer", error);
+        }
+      };
+    };
+
     setLiveDetection(null);
     setLiveImage("");
     setLastFrameAt(0);
     setStreamMessage("");
     setImageSize({ width: 0, height: 0 });
+    connectViewer();
 
-    const socket = createViewerSocket(selectedCamera);
-
-    socket.onopen = () => setConnectionState("connected");
-    socket.onclose = () => setConnectionState("closed");
-    socket.onerror = () => setConnectionState("error");
-
-    socket.onmessage = (event) => {
-      try {
-        const payload = JSON.parse(event.data);
-
-        if (payload.type === "status") {
-          setStreamMessage(payload.message || "");
-
-          if (payload.clear_image || payload.state === "offline") {
-            setLiveDetection(null);
-            setLiveImage("");
-            setLastFrameAt(0);
-            setImageSize({ width: 0, height: 0 });
-          }
-          return;
+    return () => {
+      disposed = true;
+      if (reconnectTimer) {
+        window.clearTimeout(reconnectTimer);
+      }
+      if (rafId !== null) {
+        window.cancelAnimationFrame(rafId);
+      }
+      if (socket) {
+        socket.onopen = null;
+        socket.onclose = null;
+        socket.onerror = null;
+        socket.onmessage = null;
+        if (
+          socket.readyState === WebSocket.OPEN ||
+          socket.readyState === WebSocket.CONNECTING
+        ) {
+          socket.close(1000, "viewer unmount");
         }
-
-        if (payload.type === "detection") {
-          const { image, ...detectionPayload } = payload;
-          setLiveDetection(detectionPayload);
-          setStreamMessage("");
-          setLastFrameAt(Date.now());
-
-          if (image) {
-            setLiveImage(image);
-          }
-        }
-      } catch (error) {
-        console.error("Gagal membaca payload viewer", error);
       }
     };
-
-    return () => socket.close();
   }, [selectedCamera]);
 
   useEffect(() => {

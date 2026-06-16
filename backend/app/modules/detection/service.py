@@ -3,7 +3,7 @@ import base64
 from concurrent.futures import ThreadPoolExecutor
 
 from database import ViolationDatabase
-from detector import APDDetector, calculate_severity
+from detector import APDDetector, DISPLAY_ALLOWED_CLASSES, calculate_severity
 from models import DetectionResult
 
 import cameras as cam_module
@@ -69,6 +69,28 @@ class DetectionService:
         }
         return mapping.get(class_name)
 
+    def _apd_for_detection_class(self, class_name: str) -> str | None:
+        mapping = {
+            "helmet": "helmet",
+            "hardhat": "helmet",
+            "vest": "vest",
+            "safety-vest": "vest",
+            "safety_vest": "vest",
+            "safety vest": "vest",
+            "boots": "safety-shoes",
+            "safety-shoes": "safety-shoes",
+            "safety_shoes": "safety-shoes",
+            "safety shoes": "safety-shoes",
+            "goggles": "goggles",
+            "glasses": "goggles",
+            "safety-glasses": "goggles",
+            "safety_glasses": "goggles",
+            "safety glasses": "goggles",
+            "gloves": "gloves",
+            "glove": "gloves",
+        }
+        return mapping.get(class_name)
+
     def apply_camera_rule(self, result: DetectionResult) -> DetectionResult:
         rule = self._active_rule_for_camera(result.camera_id)
         if not rule:
@@ -83,8 +105,15 @@ class DetectionService:
         filtered_detections = []
 
         for detection in result.detections:
-            if not detection.is_violation:
+            if detection.class_name not in DISPLAY_ALLOWED_CLASSES:
+                continue
+            if detection.class_name == "person":
                 filtered_detections.append(detection)
+                continue
+            if not detection.is_violation:
+                detection_apd = self._apd_for_detection_class(detection.class_name)
+                if detection_apd is not None and detection_apd in required_apd:
+                    filtered_detections.append(detection)
                 continue
 
             if self._apd_for_violation_class(detection.class_name) in required_apd:

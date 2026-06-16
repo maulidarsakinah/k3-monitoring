@@ -16,7 +16,7 @@ from app.shared.evidence import save_evidence_image
 from app.modules.detection.service import DetectionService
 from app.modules.streams.websocket_manager import ConnectionManager
 from models import DetectionResult
-from detector import calculate_severity
+from detector import DISPLAY_ALLOWED_CLASSES, calculate_severity
 
 
 logger = logging.getLogger(__name__)
@@ -25,6 +25,7 @@ VIEWER_IMAGE_MAX_WIDTH = int(os.getenv("VIEWER_IMAGE_MAX_WIDTH", "960"))
 VIEWER_IMAGE_JPEG_QUALITY = int(os.getenv("VIEWER_IMAGE_JPEG_QUALITY", "82"))
 LATEST_PAYLOAD_TTL_SECONDS = float(
     os.getenv("LATEST_PAYLOAD_TTL_SECONDS", "30"))
+RTSP_MAX_READ_FAILURES = int(os.getenv("RTSP_MAX_READ_FAILURES", "20"))
 
 
 class StreamService:
@@ -39,7 +40,7 @@ class StreamService:
         self.latest_payloads: dict[str, dict] = {}
         self.latest_payload_seen_at: dict[str, float] = {}
 
-    def _viewer_image_base64(self, image_bytes: bytes) -> str:
+    def _encode_viewer_image_base64(self, image_bytes: bytes) -> str:
         frame = cv2.imdecode(
             np.frombuffer(image_bytes, dtype=np.uint8),
             cv2.IMREAD_COLOR,
@@ -65,23 +66,82 @@ class StreamService:
             return base64.b64encode(image_bytes).decode()
         return base64.b64encode(buffer).decode()
 
+    async def _viewer_image_base64(self, image_bytes: bytes) -> str:
+        return await asyncio.to_thread(self._encode_viewer_image_base64, image_bytes)
+
+    def _log_ws_camera_stats(self, camera_id: str, stats: dict):
+        loop = asyncio.get_running_loop()
+        now = loop.time()
+        elapsed = now - stats["last_log"]
+        if elapsed < 5.0:
+            return
+        logger.info(
+            "[%s] recv=%d (%.1f/s) proc=%d (%.1f/s) sent=%d (%.1f/s) dropped=%d",
+            camera_id,
+            stats["received"],
+            stats["received"] / elapsed,
+            stats["processed"],
+            stats["processed"] / elapsed,
+            stats["sent"],
+            stats["sent"] / elapsed,
+            stats["dropped"],
+        )
+        stats["received"] = 0
+        stats["processed"] = 0
+        stats["sent"] = 0
+        stats["dropped"] = 0
+        stats["last_log"] = now
+
     def _is_latest_payload_fresh(self, camera_id: str) -> bool:
         seen_at = self.latest_payload_seen_at.get(camera_id)
         if seen_at is None:
             return False
         return asyncio.get_running_loop().time() - seen_at <= LATEST_PAYLOAD_TTL_SECONDS
 
-    async def _mark_stream_offline(self, camera_id: str, message: str):
-        self.latest_payloads.pop(camera_id, None)
-        self.latest_payload_seen_at.pop(camera_id, None)
+    def _has_live_camera_source(self, camera_id: str) -> bool:
+        if camera_id in self.manager.camera_connections:
+            return True
+        camera = cam_module.get_camera_by_name(camera_id)
+        if not camera:
+            return False
+        task = self.tasks.get(camera["id"])
+        return task is not None and not task.done()
+
+    async def _notify_stream_status(
+        self,
+        camera_id: str,
+        state: str,
+        message: str,
+        clear_image: bool = False,
+    ):
         await self.manager.broadcast_to_viewers(camera_id, {
             "type": "status",
             "camera_id": camera_id,
-            "state": "offline",
+            "state": state,
             "message": message,
-            "clear_image": True,
+            "clear_image": clear_image,
             "timestamp": datetime.now().isoformat(),
         })
+
+    async def _mark_stream_offline(self, camera_id: str, message: str):
+        if self._has_live_camera_source(camera_id):
+            await self._notify_stream_status(
+                camera_id, "degraded", message, clear_image=False)
+            return
+        self.latest_payloads.pop(camera_id, None)
+        self.latest_payload_seen_at.pop(camera_id, None)
+        await self._notify_stream_status(
+            camera_id, "offline", message, clear_image=True)
+
+    async def _send_camera_detection_ack(
+        self, websocket: WebSocket, payload: dict, camera_id: str
+    ):
+        camera_payload = {key: value for key, value in payload.items() if key != "image"}
+        try:
+            await websocket.send_json(camera_payload)
+        except Exception as exc:
+            logger.warning(
+                "Camera ack send failed [%s]: %s", camera_id, exc)
 
     def should_log_violation(self, camera_id: str, violations: list[str]) -> bool:
         if not violations:
@@ -196,13 +256,15 @@ class StreamService:
 
         filtered_detections = []
         for detection in result.detections:
+            if detection.class_name not in DISPLAY_ALLOWED_CLASSES:
+                continue
             if detection.class_name == "person":
                 filtered_detections.append(detection)
                 continue
 
             if not detection.is_violation:
                 detection_apd = self._apd_for_detection_class(detection.class_name)
-                if detection_apd is None or detection_apd in required_apd:
+                if detection_apd is not None and detection_apd in required_apd:
                     filtered_detections.append(detection)
                 continue
 
@@ -381,7 +443,7 @@ class StreamService:
             "raw_violations": detected_result.violations,
         }
         if include_image:
-            payload["image"] = self._viewer_image_base64(image_bytes)
+            payload["image"] = await self._viewer_image_base64(image_bytes)
 
         self.latest_payloads[camera_id] = payload
         self.latest_payload_seen_at[camera_id] = asyncio.get_running_loop(
@@ -394,9 +456,65 @@ class StreamService:
         rtsp_url = camera.get("rtsp_url")
         os.environ.setdefault(
             "OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp")
+        throttle_interval = settings.websocket_detection_interval_seconds
 
         while True:
             cap = None
+            latest: dict = {"bytes": None}
+            frame_ready = asyncio.Event()
+            shutdown = False
+
+            async def process_loop():
+                while not shutdown:
+                    await frame_ready.wait()
+                    frame_ready.clear()
+                    while not shutdown:
+                        image_bytes = latest["bytes"]
+                        if image_bytes is None:
+                            break
+                        latest["bytes"] = None
+
+                        if not self.detection_service.detector:
+                            break
+
+                        if not self.should_process_frame(camera_id, throttle_interval):
+                            if latest["bytes"] is not None:
+                                continue
+                            break
+
+                        try:
+                            payload = await self.process_frame_bytes(
+                                image_bytes,
+                                camera_id,
+                                throttle_interval=None,
+                                confirm_frames=settings.rtsp_violation_confirm_frames,
+                                confirm_seconds=settings.rtsp_violation_confirm_seconds,
+                            )
+                            if payload:
+                                now_iso = datetime.now().isoformat()
+                                current_status = self.status.get(camera_db_id, {})
+                                self.status[camera_db_id] = {
+                                    **current_status,
+                                    "state": "running",
+                                    "message": "Deteksi berjalan",
+                                    "updated_at": now_iso,
+                                    "last_detection_at": now_iso,
+                                    "last_violation_at": now_iso if payload.get("logged") else current_status.get("last_violation_at"),
+                                }
+                                await self.manager.broadcast_to_viewers(camera_id, payload)
+                        except Exception as exc:
+                            logger.warning(
+                                "RTSP frame processing error [%s]: %s",
+                                camera_id,
+                                exc,
+                            )
+
+                        if latest["bytes"] is not None:
+                            continue
+                        break
+
+            processor_task = asyncio.create_task(process_loop())
+
             try:
                 self.status[camera_db_id] = {
                     "camera_id": camera_id,
@@ -421,10 +539,17 @@ class StreamService:
                     "last_violation_at": None,
                 }
 
+                read_failures = 0
                 while True:
                     ret, frame = await asyncio.to_thread(cap.read)
                     if not ret or frame is None:
-                        raise RuntimeError("Frame RTSP gagal dibaca")
+                        read_failures += 1
+                        if read_failures >= RTSP_MAX_READ_FAILURES:
+                            raise RuntimeError("Frame RTSP gagal dibaca")
+                        await asyncio.sleep(0.05)
+                        continue
+                    read_failures = 0
+
                     ok, buffer = await asyncio.to_thread(cv2.imencode, ".jpg", frame)
                     if not ok:
                         await asyncio.sleep(settings.rtsp_frame_interval_seconds)
@@ -440,24 +565,8 @@ class StreamService:
                         "last_frame_at": now_iso,
                     }
 
-                    payload = await self.process_frame_bytes(
-                        buffer.tobytes(),
-                        camera_id,
-                        confirm_frames=settings.rtsp_violation_confirm_frames,
-                        confirm_seconds=settings.rtsp_violation_confirm_seconds,
-                    )
-                    if payload:
-                        now_iso = datetime.now().isoformat()
-                        current_status = self.status.get(camera_db_id, {})
-                        self.status[camera_db_id] = {
-                            **current_status,
-                            "message": "Deteksi berjalan",
-                            "updated_at": now_iso,
-                            "last_detection_at": now_iso,
-                            "last_violation_at": now_iso if payload.get("logged") else current_status.get("last_violation_at"),
-                        }
-                        await self.manager.broadcast_to_viewers(camera_id, payload)
-
+                    latest["bytes"] = buffer.tobytes()
+                    frame_ready.set()
                     await asyncio.sleep(settings.rtsp_frame_interval_seconds)
 
             except asyncio.CancelledError:
@@ -474,7 +583,13 @@ class StreamService:
                 raise
             except Exception as exc:
                 logger.warning(f"RTSP stream error [{camera_id}]: {exc}")
-                await self._mark_stream_offline(camera_id, str(exc))
+                if camera_id not in self.manager.camera_connections:
+                    await self._notify_stream_status(
+                        camera_id,
+                        "reconnecting",
+                        str(exc),
+                        clear_image=False,
+                    )
                 self.status[camera_db_id] = {
                     "camera_id": camera_id,
                     "state": "error",
@@ -486,6 +601,10 @@ class StreamService:
                 }
                 await asyncio.sleep(settings.rtsp_reconnect_seconds)
             finally:
+                shutdown = True
+                frame_ready.set()
+                processor_task.cancel()
+                await asyncio.gather(processor_task, return_exceptions=True)
                 if cap:
                     await asyncio.to_thread(cap.release)
 
@@ -526,51 +645,118 @@ class StreamService:
 
     async def websocket_camera(self, websocket: WebSocket, camera_id: str):
         await self.manager.connect_camera(websocket, camera_id)
+        loop = asyncio.get_running_loop()
+        stats = {
+            "received": 0,
+            "processed": 0,
+            "sent": 0,
+            "dropped": 0,
+            "last_log": loop.time(),
+        }
+        latest: dict = {"bytes": None, "include_image": True}
+        frame_ready = asyncio.Event()
+        shutdown = False
+        throttle_interval = settings.websocket_detection_interval_seconds
+
+        async def process_loop():
+            while not shutdown:
+                await frame_ready.wait()
+                frame_ready.clear()
+                while not shutdown:
+                    image_bytes = latest["bytes"]
+                    include_image = latest["include_image"]
+                    if image_bytes is None:
+                        break
+                    latest["bytes"] = None
+
+                    if not self.detection_service.detector:
+                        break
+
+                    if not self.should_process_frame(camera_id, throttle_interval):
+                        stats["dropped"] += 1
+                        if latest["bytes"] is not None:
+                            continue
+                        break
+
+                    stats["processed"] += 1
+                    try:
+                        payload = await self.process_frame_bytes(
+                            image_bytes,
+                            camera_id,
+                            throttle_interval=None,
+                            include_image=include_image,
+                        )
+                        if payload:
+                            await self._send_camera_detection_ack(
+                                websocket, payload, camera_id)
+                            await self.manager.broadcast_to_viewers(camera_id, payload)
+                            stats["sent"] += 1
+                    except Exception as exc:
+                        logger.warning(
+                            "Frame processing error [%s]: %s", camera_id, exc)
+
+                    if latest["bytes"] is not None:
+                        continue
+                    break
+
+        processor_task = asyncio.create_task(process_loop())
+
         try:
             while True:
                 try:
                     data = await asyncio.wait_for(websocket.receive(), timeout=30.0)
                 except asyncio.TimeoutError:
                     await websocket.send_json({"type": "ping"})
+                    self._log_ws_camera_stats(camera_id, stats)
                     continue
 
+                stats["received"] += 1
                 image_bytes = None
                 include_image = True
-                throttle_interval = settings.websocket_detection_interval_seconds
+
                 if data.get("bytes"):
                     image_bytes = data["bytes"]
                 elif data.get("text"):
                     try:
                         payload = json.loads(data["text"])
-                        if not self.should_process_frame(camera_id, throttle_interval):
-                            continue
-                        throttle_interval = None
                         if "image" in payload:
                             image_bytes = base64.b64decode(payload["image"])
-                        include_image = bool(
-                            payload.get("include_image", True))
+                        include_image = bool(payload.get("include_image", True))
                     except Exception as exc:
-                        await websocket.send_json({"type": "error", "message": str(exc)})
+                        logger.warning(
+                            "Invalid camera payload [%s]: %s", camera_id, exc)
+                        try:
+                            await websocket.send_json(
+                                {"type": "error", "message": str(exc)})
+                        except Exception:
+                            pass
+                        self._log_ws_camera_stats(camera_id, stats)
                         continue
 
-                if image_bytes and self.detection_service.detector:
-                    payload = await self.process_frame_bytes(
-                        image_bytes,
-                        camera_id,
-                        throttle_interval=throttle_interval,
-                        include_image=include_image,
-                    )
-                    if payload:
-                        await websocket.send_json(payload)
-                        await self.manager.broadcast_to_viewers(camera_id, payload)
+                if image_bytes:
+                    if latest["bytes"] is not None:
+                        stats["dropped"] += 1
+                    latest["bytes"] = image_bytes
+                    latest["include_image"] = include_image
+                    frame_ready.set()
+
+                self._log_ws_camera_stats(camera_id, stats)
 
         except WebSocketDisconnect:
-            self.manager.disconnect_camera(camera_id)
-            await self._mark_stream_offline(camera_id, "Camera sender terputus")
+            self.manager.disconnect_camera(camera_id, websocket)
+            if self.manager.camera_connections.get(camera_id) is None:
+                await self._mark_stream_offline(camera_id, "Camera sender terputus")
         except Exception as exc:
             logger.error(f"WebSocket error [{camera_id}]: {exc}")
-            self.manager.disconnect_camera(camera_id)
-            await self._mark_stream_offline(camera_id, str(exc))
+            self.manager.disconnect_camera(camera_id, websocket)
+            if self.manager.camera_connections.get(camera_id) is None:
+                await self._mark_stream_offline(camera_id, str(exc))
+        finally:
+            shutdown = True
+            frame_ready.set()
+            processor_task.cancel()
+            await asyncio.gather(processor_task, return_exceptions=True)
+            self._log_ws_camera_stats(camera_id, stats)
 
     async def websocket_viewer(self, websocket: WebSocket, camera_id: str):
 

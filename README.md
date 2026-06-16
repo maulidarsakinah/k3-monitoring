@@ -209,6 +209,7 @@ Contoh menjalankan webcam lokal:
 ```powershell
 cd backend
 .\.venv\Scripts\python.exe tools/stream_source.py --source 0 --camera-id webcam_local --fps 2
+.\.venv\Scripts\python.exe tools/stream_source.py --source 1 --camera-id iriun_webcam_local --fps 2
 ```
 
 Setelah itu buka halaman **Monitoring**, lalu pilih camera ID yang sesuai, misalnya `sample_k3`, `sample_cctv`, atau `webcam_local`.

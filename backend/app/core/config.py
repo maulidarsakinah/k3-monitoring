@@ -26,7 +26,7 @@ class Settings:
         os.getenv("INCIDENT_WINDOW_MINUTES", "3"))
 
     websocket_detection_interval_seconds: float = float(
-        os.getenv("WEBSOCKET_DETECTION_INTERVAL_SECONDS", "0.5"))
+        os.getenv("WEBSOCKET_DETECTION_INTERVAL_SECONDS", "0.66"))
     rtsp_frame_interval_seconds: float = float(
         os.getenv("RTSP_FRAME_INTERVAL_SECONDS", "0.5"))
     rtsp_reconnect_seconds: float = float(

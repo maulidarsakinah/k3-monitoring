@@ -1,5 +1,10 @@
-from fastapi import WebSocket
 import asyncio
+import logging
+
+from fastapi import WebSocket
+
+
+logger = logging.getLogger(__name__)
 
 
 class ConnectionManager:
@@ -8,10 +13,21 @@ class ConnectionManager:
         self.viewer_connections: dict[str, set[WebSocket]] = {}
 
     async def connect_camera(self, websocket: WebSocket, camera_id: str):
+        previous = self.camera_connections.get(camera_id)
+        if previous is not None and previous is not websocket:
+            try:
+                await previous.close(code=1000, reason="Replaced by new camera connection")
+            except Exception:
+                pass
+            logger.info("Camera connection replaced [%s]", camera_id)
         await websocket.accept()
         self.camera_connections[camera_id] = websocket
 
-    def disconnect_camera(self, camera_id: str):
+    def disconnect_camera(self, camera_id: str, websocket: WebSocket | None = None):
+        if websocket is not None:
+            current = self.camera_connections.get(camera_id)
+            if current is not websocket:
+                return
         self.camera_connections.pop(camera_id, None)
 
     async def connect_viewer(self, websocket: WebSocket, camera_id: str):

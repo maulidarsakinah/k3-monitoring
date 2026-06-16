@@ -63,12 +63,20 @@ async def stream_source(
     ws_url = f"{ws_base_url.rstrip('/')}/ws/camera/{safe_camera_id}"
     delay = 1.0 / max(fps, 0.1)
 
+    async def drain_server_messages(websocket):
+        try:
+            async for _message in websocket:
+                pass
+        except Exception:
+            pass
+
     while True:
         print(f"[INFO] Connecting to {ws_url}")
 
         try:
             async with websockets.connect(ws_url, max_size=10_000_000) as websocket:
                 print(f"[OK] Connected as camera_id={camera_id}")
+                drain_task = asyncio.create_task(drain_server_messages(websocket))
 
                 cap = cv2.VideoCapture(parse_source(source))
 
@@ -78,39 +86,42 @@ async def stream_source(
                 frame_count = 0
                 last_log = time.time()
 
-                while True:
-                    ret, frame = cap.read()
+                try:
+                    while True:
+                        ret, frame = cap.read()
 
-                    if not ret:
-                        if loop_video:
-                            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        if not ret:
+                            if loop_video:
+                                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                                continue
+
+                            print("[INFO] Video selesai.")
+                            break
+
+                        image_base64 = encode_frame_to_base64(frame)
+
+                        if image_base64 is None:
                             continue
 
-                        print("[INFO] Video selesai.")
-                        break
+                        payload = {
+                            "image": image_base64,
+                            "include_image": include_image,
+                        }
 
-                    image_base64 = encode_frame_to_base64(frame)
+                        await websocket.send(json.dumps(payload))
 
-                    if image_base64 is None:
-                        continue
+                        frame_count += 1
 
-                    payload = {
-                        "image": image_base64,
-                        "include_image": include_image,
-                    }
+                        now = time.time()
+                        if now - last_log >= 5:
+                            print(f"[INFO] Sent {frame_count} frames")
+                            last_log = now
 
-                    await websocket.send(json.dumps(payload))
-
-                    frame_count += 1
-
-                    now = time.time()
-                    if now - last_log >= 5:
-                        print(f"[INFO] Sent {frame_count} frames")
-                        last_log = now
-
-                    await asyncio.sleep(delay)
-
-                cap.release()
+                        await asyncio.sleep(delay)
+                finally:
+                    drain_task.cancel()
+                    await asyncio.gather(drain_task, return_exceptions=True)
+                    cap.release()
 
                 if not loop_video:
                     break

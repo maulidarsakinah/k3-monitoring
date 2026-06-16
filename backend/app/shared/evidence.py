@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 
 from app.core.config import settings
+from detector import DISPLAY_ALLOWED_CLASSES
 
 
 def _is_negative_class(class_name: str) -> bool:
@@ -109,6 +110,8 @@ def annotate_evidence_image(image_bytes: bytes, result) -> bytes:
     detections = getattr(result, "detections", []) or []
 
     for detection in detections:
+        if detection.class_name not in DISPLAY_ALLOWED_CLASSES:
+            continue
         x1, y1, x2, y2 = [int(v) for v in detection.bbox]
 
         x1 = max(0, min(x1, image.shape[1] - 1))
