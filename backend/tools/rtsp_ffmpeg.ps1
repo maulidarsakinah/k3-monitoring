@@ -1,9 +1,11 @@
 param(
     [string]$Video1 = "sample_video\sample-k3.mp4",
     [string]$Video2 = "sample_video\sample-k3-cctv.mp4",
+    [string]$Video3 = "sample_video\sample-k3-cctv 2.mp4",
 
     [string]$Name1 = "sample_k3",
-    [string]$Name2 = "sample_cctv",
+    [string]$Name2 = "sample_k3_cctv",
+    [string]$Name3 = "sample_k3_cctv_2",
 
     [int]$Port = 8554
 )
@@ -88,6 +90,8 @@ paths:
 
 $Video1Path = Resolve-ToolPath $Video1
 $Video2Path = Resolve-ToolPath $Video2
+$Video3Path = Resolve-ToolPath $Video3
+
 
 if (!(Test-Path $Video1Path)) {
     Write-Host "ERROR: Video 1 tidak ditemukan:" -ForegroundColor Red
@@ -101,16 +105,25 @@ if (!(Test-Path $Video2Path)) {
     exit 1
 }
 
+if (!(Test-Path $Video3Path)) {
+    Write-Host "ERROR: Video 3 tidak ditemukan:" -ForegroundColor Red
+    Write-Host $Video2Path
+    exit 1
+}
+
 $Video1Full = (Resolve-Path $Video1Path).Path
 $Video2Full = (Resolve-Path $Video2Path).Path
+$Video3Full = (Resolve-Path $Video3Path).Path
 
 $RtspUrl1 = "rtsp://127.0.0.1:$Port/$Name1"
 $RtspUrl2 = "rtsp://127.0.0.1:$Port/$Name2"
+$RtspUrl3 = "rtsp://127.0.0.1:$Port/$Name3"
 
 Write-Host ""
 Write-Host "RTSP URL:" -ForegroundColor Green
 Write-Host "1. $RtspUrl1"
 Write-Host "2. $RtspUrl2"
+Write-Host "3. $RtspUrl3"
 Write-Host ""
 
 Write-Host "[5] Menjalankan MediaMTX..." -ForegroundColor Yellow
@@ -122,10 +135,13 @@ Write-Host "[6] Menjalankan FFmpeg publisher..." -ForegroundColor Yellow
 
 $Command1 = "ffmpeg -re -stream_loop -1 -i `"$Video1Full`" -an -c:v copy -f rtsp -rtsp_transport tcp `"$RtspUrl1`""
 $Command2 = "ffmpeg -re -stream_loop -1 -i `"$Video2Full`" -an -c:v copy -f rtsp -rtsp_transport tcp `"$RtspUrl2`""
+$Command3 = "ffmpeg -re -stream_loop -1 -i `"$Video3Full`" -an -c:v copy -f rtsp -rtsp_transport tcp `"$RtspUrl3`""
 
 Start-Terminal "K3 FFmpeg sample_k3" $Command1
 Start-Sleep -Seconds 1
 Start-Terminal "K3 FFmpeg sample_cctv" $Command2
+Start-Sleep -Seconds 1
+Start-Terminal "K3 FFmpeg sample_cctv_2" $Command3
 
 Write-Host ""
 Write-Host "Selesai. Jangan tutup terminal MediaMTX dan FFmpeg." -ForegroundColor Green
@@ -133,8 +149,10 @@ Write-Host ""
 Write-Host "Masukkan ke Management Kamera:"
 Write-Host "1. $RtspUrl1"
 Write-Host "2. $RtspUrl2"
+Write-Host "3. $RtspUrl3"
 Write-Host ""
 Write-Host "Tes:"
 Write-Host "ffplay -rtsp_transport tcp `"$RtspUrl1`""
 Write-Host "ffplay -rtsp_transport tcp `"$RtspUrl2`""
+Write-Host "ffplay -rtsp_transport tcp `"$RtspUrl3`""
 Write-Host ""

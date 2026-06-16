@@ -249,8 +249,15 @@ RTSP URL    : rtsp://127.0.0.1:8554/sample_k3
 Kamera kedua:
 
 ```text
-Nama Kamera : sample_cctv
-RTSP URL    : rtsp://127.0.0.1:8555/sample_cctv
+Nama Kamera : sample_k3_cctv
+RTSP URL    : rtsp://127.0.0.1:8555/sample_k3_cctv
+```
+
+Kamera ketiga:
+
+```text
+Nama Kamera : sample_k3_cctv_2
+RTSP URL    : rtsp://127.0.0.1:8555/sample_k3_cctv_2
 ```
 
 Setelah kamera ditambahkan, buka halaman **Monitoring**.
@@ -278,7 +285,8 @@ Secara default script membuat dua RTSP URL dalam satu port:
 
 ```text
 rtsp://127.0.0.1:8554/sample_k3
-rtsp://127.0.0.1:8554/sample_cctv
+rtsp://127.0.0.1:8554/sample_k3_cctv
+rtsp://127.0.0.1:8554/sample_k3_cctv_2
 ```
 
 Tambahkan URL tersebut di halaman **Management Kamera**, lalu buka halaman **Monitoring**.
@@ -304,13 +312,6 @@ Jika RTSP tidak tampil:
 3. Pastikan kamera sudah ditambahkan dan aktif di halaman Management.
 4. Coba restart stream dari halaman Management atau Monitoring.
 5. Cek URL RTSP di VLC melalui menu **Media > Open Network Stream**.
-
-Untuk RTSP yang frame-nya kurang stabil, backend menunggu 6 frame dan 6 detik konfirmasi sebelum menyimpan violation. Nilai ini bisa diubah lewat environment variable:
-
-```powershell
-$env:RTSP_VIOLATION_CONFIRM_FRAMES="8"
-$env:RTSP_VIOLATION_CONFIRM_SECONDS="10"
-$env:LOG_COOLDOWN_SECONDS="30"
 ```
 
 ## Cara Menjalankan Dengan Docker Compose
