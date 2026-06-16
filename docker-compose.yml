@@ -1,0 +1,40 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: k3-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    networks:
+      - k3-network
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: k3-frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/workspace/frontend
+      - /workspace/node_modules
+      - /workspace/frontend/node_modules
+    environment:
+      - VITE_API_BASE_URL=http://127.0.0.1:8000
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - k3-network
+
+networks:
+  k3-network:
+    driver: bridge

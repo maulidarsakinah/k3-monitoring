@@ -1,0 +1,667 @@
+import sqlite3
+import json
+import logging
+import os
+from datetime import datetime, timedelta
+
+from models import DetectionResult
+from app.core.database import connect
+from app.core.config import settings
+
+
+logger = logging.getLogger(__name__)
+
+DB_PATH = settings.db_path
+
+AUTO_REVIEW_CONFIDENCE_THRESHOLD = float(
+    os.getenv("AUTO_REVIEW_CONFIDENCE_THRESHOLD", "0.82")
+)
+
+
+def _normalize_end_date(end_date: str = None) -> str:
+    if end_date and len(end_date) == 10:
+        return f"{end_date}T23:59:59"
+    return end_date
+
+
+def _date_range_start(date_range: str = None) -> str | None:
+    if not date_range:
+        return None
+
+    now = datetime.now()
+
+    if date_range == "today":
+        return now.strftime("%Y-%m-%dT00:00:00")
+
+    if date_range == "weekly":
+        return (now - timedelta(days=7)).isoformat()
+
+    if date_range == "monthly":
+        return (now - timedelta(days=30)).isoformat()
+
+    return None
+
+
+class ViolationDatabase:
+    def __init__(self, db_path: str = DB_PATH):
+        self.db_path = db_path
+        self._init_db()
+
+    def _get_conn(self):
+        return connect(self.db_path)
+
+    def _init_db(self):
+        with self._get_conn() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS violations (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    camera_id       TEXT NOT NULL,
+                    timestamp       TEXT NOT NULL,
+                    violations      TEXT NOT NULL,
+                    summary         TEXT,
+                    severity        TEXT DEFAULT 'none',
+                    status          TEXT DEFAULT 'pending',
+                    validated_by    TEXT,
+                    validated_at    TEXT,
+                    validation_note TEXT,
+                    evidence_path   TEXT,
+                    report_sent_by  TEXT,
+                    report_sent_at  TEXT,
+                    report_note     TEXT,
+                    created_at      TEXT DEFAULT (datetime('now'))
+                )
+            """)
+
+            columns = [
+                row[1]
+                for row in conn.execute("PRAGMA table_info(violations)").fetchall()
+            ]
+
+            extra_columns = {
+                "evidence_path": "TEXT",
+                "severity": "TEXT DEFAULT 'none'",
+                "report_sent_by": "TEXT",
+                "report_sent_at": "TEXT",
+                "report_note": "TEXT",
+                "staff_reviewed_by": "TEXT",
+                "staff_reviewed_at": "TEXT",
+                "staff_note": "TEXT",
+                "first_detected_at": "TEXT",
+                "last_detected_at": "TEXT",
+                "occurrence_count": "INTEGER DEFAULT 1",
+                "confidence_avg": "REAL DEFAULT 0",
+                "confidence_max": "REAL DEFAULT 0",
+                "incident_key": "TEXT",
+            }
+
+            for column, column_type in extra_columns.items():
+                if column not in columns:
+                    conn.execute(
+                        f"ALTER TABLE violations ADD COLUMN {column} {column_type}"
+                    )
+
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_camera_id ON violations (camera_id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_timestamp ON violations (timestamp)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_status ON violations (status)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_severity ON violations (severity)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_incident_key ON violations (incident_key)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_violations_timestamp_camera ON violations (timestamp, camera_id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_violations_status_timestamp ON violations (status, timestamp)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_violations_severity_timestamp ON violations (severity, timestamp)"
+            )
+
+            conn.commit()
+
+    def log_violation(self, result: DetectionResult, evidence_path: str = None):
+        try:
+            incident_key = self._incident_key(
+                result.camera_id,
+                result.violations,
+            )
+
+            confidence = self._max_confidence(result)
+            auto_review = confidence >= AUTO_REVIEW_CONFIDENCE_THRESHOLD
+            timestamp = result.timestamp or datetime.now().isoformat()
+
+            try:
+                parsed_timestamp = datetime.fromisoformat(timestamp)
+            except ValueError:
+                parsed_timestamp = datetime.now()
+
+            cutoff = (
+                parsed_timestamp - timedelta(
+                    seconds=settings.incident_duplicate_window_seconds
+                )
+            ).isoformat()
+
+            with self._get_conn() as conn:
+                conn.row_factory = sqlite3.Row
+                existing = conn.execute(
+                    """SELECT * FROM violations
+                       WHERE incident_key = ?
+                         AND COALESCE(last_detected_at, timestamp) >= ?
+                       ORDER BY COALESCE(last_detected_at, timestamp) DESC
+                       LIMIT 1""",
+                    (incident_key, cutoff),
+                ).fetchone()
+
+                if existing:
+                    count = (existing["occurrence_count"] or 1) + 1
+                    old_avg = existing["confidence_avg"] or 0
+                    next_avg = ((old_avg * (count - 1)) + confidence) / count
+                    next_max = max(existing["confidence_max"] or 0, confidence)
+
+                    should_auto_review = (
+                        existing["status"] not in ("approved", "rejected", "needs_manager")
+                        and (auto_review or next_max >= AUTO_REVIEW_CONFIDENCE_THRESHOLD)
+                    )
+
+                    if should_auto_review:
+                        conn.execute(
+                            """UPDATE violations
+                               SET last_detected_at=?,
+                                   occurrence_count=?,
+                                   confidence_avg=?,
+                                   confidence_max=?,
+                                   summary=?,
+                                   severity=?,
+                                   evidence_path=COALESCE(?, evidence_path),
+                                   status='staff_reviewed',
+                                   staff_reviewed_by='system',
+                                   staff_reviewed_at=?,
+                                   staff_note=?
+                               WHERE id=?""",
+                            (
+                                timestamp,
+                                count,
+                                next_avg,
+                                next_max,
+                                result.summary,
+                                result.severity,
+                                evidence_path,
+                                datetime.now().isoformat(),
+                                f"Auto review: confidence {round(next_max * 100)}%",
+                                existing["id"],
+                            ),
+                        )
+                    else:
+                        conn.execute(
+                            """UPDATE violations
+                               SET last_detected_at=?,
+                                   occurrence_count=?,
+                                   confidence_avg=?,
+                                   confidence_max=?,
+                                   summary=?,
+                                   severity=?,
+                                   evidence_path=COALESCE(?, evidence_path)
+                               WHERE id=?""",
+                            (
+                                timestamp,
+                                count,
+                                next_avg,
+                                next_max,
+                                result.summary,
+                                result.severity,
+                                evidence_path,
+                                existing["id"],
+                            ),
+                        )
+                else:
+                    conn.execute(
+                        """INSERT INTO violations (
+                               camera_id,
+                               timestamp,
+                               violations,
+                               summary,
+                               severity,
+                               status,
+                               evidence_path,
+                               first_detected_at,
+                               last_detected_at,
+                               occurrence_count,
+                               confidence_avg,
+                               confidence_max,
+                               incident_key,
+                               staff_reviewed_by,
+                               staff_reviewed_at,
+                               staff_note
+                           )
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            result.camera_id,
+                            timestamp,
+                            json.dumps(result.violations),
+                            result.summary,
+                            result.severity,
+                            "staff_reviewed" if auto_review else "detected",
+                            evidence_path,
+                            timestamp,
+                            timestamp,
+                            confidence,
+                            confidence,
+                            incident_key,
+                            "system" if auto_review else None,
+                            datetime.now().isoformat() if auto_review else None,
+                            f"Auto review: confidence {round(confidence * 100)}%"
+                            if auto_review
+                            else None,
+                        ),
+                    )
+
+                conn.commit()
+
+        except Exception as e:
+            logger.error(f"Gagal menyimpan log: {e}")
+
+    def _build_where(
+        self,
+        camera_id: str = None,
+        start_date: str = None,
+        end_date: str = None,
+        status: str = None,
+        severity: str = None,
+        date_range: str = None,
+    ) -> tuple[str, list]:
+        end_date = _normalize_end_date(end_date)
+        range_start = _date_range_start(date_range)
+
+        query = " WHERE 1=1"
+        params = []
+
+        if range_start:
+            query += " AND timestamp >= ?"
+            params.append(range_start)
+
+        if camera_id:
+            query += " AND camera_id = ?"
+            params.append(camera_id)
+
+        if start_date:
+            query += " AND timestamp >= ?"
+            params.append(start_date)
+
+        if end_date:
+            query += " AND timestamp <= ?"
+            params.append(end_date)
+
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+
+        if severity:
+            query += " AND severity = ?"
+            params.append(severity)
+
+        return query, params
+
+    def get_violations(
+        self,
+        limit: int = 50,
+        camera_id: str = None,
+        start_date: str = None,
+        end_date: str = None,
+        status: str = None,
+        page: int | None = None,
+        severity: str = None,
+        date_range: str = None,
+    ):
+        where, params = self._build_where(
+            camera_id=camera_id,
+            start_date=start_date,
+            end_date=end_date,
+            status=status,
+            severity=severity,
+            date_range=date_range,
+        )
+
+        with self._get_conn() as conn:
+            total = conn.execute(
+                f"SELECT COUNT(*) FROM violations{where}",
+                params,
+            ).fetchone()[0]
+
+        if page is None:
+            query = f"SELECT * FROM violations{where} ORDER BY timestamp DESC LIMIT ?"
+            query_params = params + [limit]
+        else:
+            offset = (page - 1) * limit
+            query = f"SELECT * FROM violations{where} ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+            query_params = params + [limit, offset]
+
+        with self._get_conn() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(query, query_params).fetchall()
+
+        mapped = [self._row_to_dict(r) for r in rows]
+
+        if page is None:
+            return mapped
+
+        total_pages = (total + limit - 1) // limit if total > 0 else 1
+
+        return {
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "total_pages": total_pages,
+            "violations": mapped,
+        }
+
+    def get_violation_by_id(self, violation_id: int) -> dict:
+        with self._get_conn() as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT * FROM violations WHERE id = ?",
+                (violation_id,),
+            ).fetchone()
+
+        if not row:
+            return None
+
+        return self._row_to_dict(row)
+
+    def validate_violation(
+        self,
+        violation_id: int,
+        action: str,
+        validated_by: str,
+        note: str = None,
+    ) -> dict:
+        """action: 'approved' atau 'rejected'"""
+        if action not in ("approved", "rejected"):
+            raise ValueError("Action harus 'approved' atau 'rejected'")
+
+        with self._get_conn() as conn:
+            affected = conn.execute(
+                """UPDATE violations
+                   SET status=?,
+                       validated_by=?,
+                       validated_at=?,
+                       validation_note=?
+                   WHERE id=?""",
+                (
+                    action,
+                    validated_by,
+                    datetime.now().isoformat(),
+                    note,
+                    violation_id,
+                ),
+            ).rowcount
+            conn.commit()
+
+        if affected == 0:
+            return None
+
+        return self.get_violation_by_id(violation_id)
+
+    def submit_report(
+        self,
+        violation_id: int,
+        sent_by: str,
+        note: str = None,
+    ) -> dict:
+        with self._get_conn() as conn:
+            affected = conn.execute(
+                """UPDATE violations
+                   SET status='needs_manager',
+                       report_sent_by=?,
+                       report_sent_at=?,
+                       report_note=?
+                   WHERE id=? AND status IN ('detected', 'pending', 'staff_reviewed')""",
+                (
+                    sent_by,
+                    datetime.now().isoformat(),
+                    note,
+                    violation_id,
+                ),
+            ).rowcount
+            conn.commit()
+
+        if affected == 0:
+            return None
+
+        return self.get_violation_by_id(violation_id)
+
+    def staff_review(
+        self,
+        violation_id: int,
+        reviewed_by: str,
+        note: str = None,
+    ) -> dict:
+        with self._get_conn() as conn:
+            affected = conn.execute(
+                """UPDATE violations
+                   SET status='staff_reviewed',
+                       staff_reviewed_by=?,
+                       staff_reviewed_at=?,
+                       staff_note=?
+                   WHERE id=? AND status IN ('detected', 'pending', 'staff_reviewed')""",
+                (
+                    reviewed_by,
+                    datetime.now().isoformat(),
+                    note,
+                    violation_id,
+                ),
+            ).rowcount
+            conn.commit()
+
+        if affected == 0:
+            return None
+
+        return self.get_violation_by_id(violation_id)
+
+    def delete_violation(self, violation_id: int) -> bool:
+        with self._get_conn() as conn:
+            affected = conn.execute(
+                "DELETE FROM violations WHERE id = ?",
+                (violation_id,),
+            ).rowcount
+            conn.commit()
+
+        return affected > 0
+
+    def get_stats(
+        self,
+        camera_id: str = None,
+        start_date: str = None,
+        end_date: str = None,
+        severity: str = None,
+        date_range: str = None,
+    ) -> dict:
+        where, params_filter = self._build_where(
+            camera_id=camera_id,
+            start_date=start_date,
+            end_date=end_date,
+            severity=severity,
+            date_range=date_range,
+        )
+
+        with self._get_conn() as conn:
+            total = conn.execute(
+                f"SELECT COUNT(*) FROM violations{where}",
+                params_filter,
+            ).fetchone()[0]
+
+            today = datetime.now().strftime("%Y-%m-%d")
+            today_count = conn.execute(
+                "SELECT COUNT(*) FROM violations WHERE timestamp LIKE ?",
+                (f"{today}%",),
+            ).fetchone()[0]
+
+            status_rows = conn.execute(
+                f"SELECT status, COUNT(*) FROM violations{where} GROUP BY status",
+                params_filter,
+            ).fetchall()
+
+            severity_rows = conn.execute(
+                f"SELECT severity, COUNT(*) FROM violations{where} GROUP BY severity",
+                params_filter,
+            ).fetchall()
+
+            rows = conn.execute(
+                f"SELECT violations FROM violations{where}",
+                params_filter,
+            ).fetchall()
+
+        status_counts = {row[0] or "pending": row[1] for row in status_rows}
+
+        detected = status_counts.get(
+            "detected", 0) + status_counts.get("pending", 0)
+        needs_manager = status_counts.get("needs_manager", 0)
+        staff_reviewed = status_counts.get("staff_reviewed", 0)
+        approved = status_counts.get("approved", 0)
+        rejected = status_counts.get("rejected", 0)
+
+        violation_counts: dict[str, int] = {}
+
+        for (v_json,) in rows:
+            for v in json.loads(v_json):
+                violation_counts[v] = violation_counts.get(v, 0) + 1
+
+        return {
+            "total_violations": total,
+            "violations_today": today_count,
+            "by_status": {
+                "pending": detected + needs_manager,
+                "detected": detected,
+                "staff_reviewed": staff_reviewed,
+                "needs_manager": needs_manager,
+                "approved": approved,
+                "rejected": rejected,
+            },
+            "by_severity": {
+                row[0] or "none": row[1]
+                for row in severity_rows
+            },
+            "violation_breakdown": violation_counts,
+            "filter": {
+                "camera_id": camera_id,
+                "start_date": start_date,
+                "end_date": end_date,
+                "severity": severity,
+                "date_range": date_range,
+            },
+        }
+
+    def get_trend(
+        self,
+        start_date: str = None,
+        end_date: str = None,
+        camera_id: str = None,
+        date_range: str = None,
+    ) -> list[dict]:
+        where, params = self._build_where(
+            camera_id=camera_id,
+            start_date=start_date,
+            end_date=end_date,
+            date_range=date_range,
+        )
+
+        query = f"""
+            SELECT
+                DATE(timestamp) as date,
+                COUNT(*) as count,
+                SUM(CASE WHEN status IN ('detected', 'pending', 'needs_manager') THEN 1 ELSE 0 END) as pending,
+                SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
+                SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected,
+                SUM(CASE WHEN status = 'staff_reviewed' THEN 1 ELSE 0 END) as staff_reviewed,
+                SUM(CASE WHEN status = 'needs_manager' THEN 1 ELSE 0 END) as needs_manager
+            FROM violations{where}
+            GROUP BY DATE(timestamp)
+            ORDER BY date ASC
+        """
+
+        with self._get_conn() as conn:
+            rows = conn.execute(query, params).fetchall()
+
+        return [
+            {
+                "date": r[0],
+                "count": r[1],
+                "pending": r[2] or 0,
+                "approved": r[3] or 0,
+                "rejected": r[4] or 0,
+                "staff_reviewed": r[5] or 0,
+                "needs_manager": r[6] or 0,
+            }
+            for r in rows
+        ]
+
+    def get_all_for_export(
+        self,
+        start_date: str = None,
+        end_date: str = None,
+        camera_id: str = None,
+        status: str = None,
+        severity: str = None,
+        date_range: str = None,
+    ) -> list[dict]:
+        """Ambil semua data tanpa limit untuk export."""
+        where, params = self._build_where(
+            camera_id=camera_id,
+            start_date=start_date,
+            end_date=end_date,
+            status=status,
+            severity=severity,
+            date_range=date_range,
+        )
+
+        query = f"SELECT * FROM violations{where} ORDER BY timestamp DESC"
+
+        with self._get_conn() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(query, params).fetchall()
+
+        return [self._row_to_dict(r) for r in rows]
+
+    def _row_to_dict(self, row) -> dict:
+        d = dict(row)
+
+        d["violations"] = json.loads(d["violations"])
+        d["first_detected_at"] = d.get(
+            "first_detected_at") or d.get("timestamp")
+        d["last_detected_at"] = d.get("last_detected_at") or d.get("timestamp")
+        d["occurrence_count"] = d.get("occurrence_count") or 1
+        d["confidence_avg"] = d.get("confidence_avg") or 0
+        d["confidence_max"] = d.get("confidence_max") or 0
+        d["severity"] = d.get("severity") or "none"
+
+        return d
+
+    def _incident_key(self, camera_id: str, violations: list[str]) -> str:
+        return f"{camera_id}:{','.join(sorted(violations or []))}"
+
+    def _max_confidence(self, result: DetectionResult) -> float:
+        values = [
+            detection.confidence
+            for detection in result.detections
+            if detection.is_violation
+        ]
+
+        if not values:
+            values = [
+                detection.confidence
+                for detection in result.detections
+            ]
+
+        return max(values) if values else 0.85
+
+    def clear(self):
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM violations")
+            conn.commit()
